@@ -1,0 +1,63 @@
+"""Application settings and configuration"""
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+class Settings:
+    """Application settings"""
+    
+    # Claude API
+    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+    
+    # OpenRouter Configuration (optional)
+    USE_OPENROUTER = os.getenv("USE_OPENROUTER", "false").lower() == "true"
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+    OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet")
+    OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+    
+    # Drift Protocol
+    DRIFT_RPC_URL = os.getenv("DRIFT_RPC_URL", "https://api.mainnet-beta.solana.com")
+    DRIFT_PROGRAM_ID = os.getenv("DRIFT_PROGRAM_ID", "dRiftyHA39MWEi3m9aunc5MzRF1JYJjb5ciH7N27eNn")
+    
+    # WebSocket
+    WS_HOST = os.getenv("WS_HOST", "0.0.0.0")
+    WS_PORT = int(os.getenv("WS_PORT", "8000"))
+    
+    # Trading Assets (used by all WS sources)
+    TRADING_ASSETS = os.getenv("TRADING_ASSETS", "BTC,ETH,SOL,DOGE,BNB,SUI,APT,ARB,RENDER,XRP,INJ,LINK,PYTH,JTO,AVAX,WIF,JUP,TAO,KMNO,TNSR,DRIFT,RAY,HYPE,LTC,FARTCOIN").split(",")
+    
+    # Drift WebSocket
+    DRIFT_WS_URL = os.getenv("DRIFT_WS_URL", "wss://drift-mainnet.rpc.drift.trade")
+    DRIFT_SUBSCRIBE_ASSETS = int(os.getenv("DRIFT_SUBSCRIBE_ASSETS", "25"))
+    # Use TRADING_ASSETS for Drift (backward compatibility)
+    DRIFT_ASSETS = TRADING_ASSETS
+    
+    # Binance Configuration
+    BINANCE_API_URL = os.getenv("BINANCE_API_URL", "https://api.binance.com")
+    BINANCE_WS_URL = os.getenv("BINANCE_WS_URL", "wss://stream.binance.com:9443/ws")
+    BINANCE_OHLC_INTERVAL = os.getenv("BINANCE_OHLC_INTERVAL", "1h")
+    BINANCE_OHLC_DOWNLOAD_LIMIT = int(os.getenv("BINANCE_OHLC_DOWNLOAD_LIMIT", "100"))
+    
+    # Data Configuration
+    WS_DATA_FIELDS = os.getenv("WS_DATA_FIELDS", "price,change_24h,volume_24h,open_interest,funding_rate").split(",")
+    OHLC_ENABLED = os.getenv("OHLC_ENABLED", "true").lower() == "true"
+    OHLC_HISTORY_ENABLED = os.getenv("OHLC_HISTORY_ENABLED", "true").lower() == "true"
+    
+    # Environment
+    ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+    DEBUG = os.getenv("DEBUG", "true").lower() == "true"
+    
+    # Mem0 Configuration
+    MEM0_ENABLED = os.getenv("MEM0_ENABLED", "true").lower() == "true"
+    MEM0_HOST = os.getenv("MEM0_HOST", "localhost")
+    MEM0_PORT = int(os.getenv("MEM0_PORT", "8080"))
+    MEM0_URL = f"http://{MEM0_HOST}:{MEM0_PORT}"
+    
+    # SearXNG Configuration (Not used - using DuckDuckGo instead)
+    SEARXNG_ENABLED = os.getenv("SEARXNG_ENABLED", "false").lower() == "true"
+    SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8888")
+
+
+settings = Settings()

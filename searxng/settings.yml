@@ -1,0 +1,526 @@
+# SearXNG Configuration - Minimal & Efficient
+
+general:
+  debug: false
+  instance_name: "Rabit Search"
+  
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  
+server:
+  secret_key: "rabit-searxng-secret-key-change-this"
+  limiter: false
+  image_proxy: true
+  
+ui:
+  static_use_hash: true
+  default_theme: simple
+  query_in_title: true
+  infinite_scroll: false
+  
+outgoing:
+  request_timeout: 3.0
+  max_request_timeout: 10.0
+  
+engines:
+  # ============================================================================
+  # General Search Engines
+  # ============================================================================
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+    
+  - name: google
+    engine: google
+    shortcut: go
+    disabled: false
+    
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: false
+    
+  - name: brave
+    engine: brave
+    shortcut: br
+    disabled: false
+    
+  # ============================================================================
+  # General News Media (Top 20)
+  # ============================================================================
+  
+  # 1. BBC
+  - name: bbc
+    engine: xpath
+    search_url: https://www.bbc.com/search?q={query}
+    url_xpath: //a[@class="ssrcss-1mrs5ns-PromoLink"]/@href
+    title_xpath: //a[@class="ssrcss-1mrs5ns-PromoLink"]/h3/text()
+    content_xpath: //p[@class="ssrcss-1q0x1qg-Paragraph"]/text()
+    shortcut: bbc
+    categories: [news]
+    disabled: false
+    
+  # 2. CNN
+  - name: cnn
+    engine: xpath
+    search_url: https://www.cnn.com/search?q={query}
+    url_xpath: //a[@class="container__link"]/@href
+    title_xpath: //span[@class="container__headline-text"]/text()
+    content_xpath: //div[@class="container__description"]/text()
+    shortcut: cnn
+    categories: [news]
+    disabled: false
+    
+  # 3. New York Times
+  - name: nytimes
+    engine: xpath
+    search_url: https://www.nytimes.com/search?query={query}
+    url_xpath: //a[@class="css-9mylee"]/@href
+    title_xpath: //h4[@class="css-2fgx4k"]/text()
+    content_xpath: //p[@class="css-16nhkrn"]/text()
+    shortcut: nyt
+    categories: [news]
+    disabled: false
+    
+  # 4. Al Jazeera
+  - name: aljazeera
+    engine: xpath
+    search_url: https://www.aljazeera.com/search/{query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: aj
+    categories: [news]
+    disabled: false
+    
+  # 5. Reuters
+  - name: reuters
+    engine: xpath
+    search_url: https://www.reuters.com/site-search/?query={query}
+    url_xpath: //a[@data-testid="Heading"]/@href
+    title_xpath: //a[@data-testid="Heading"]/text()
+    content_xpath: //p[@data-testid="Body"]/text()
+    shortcut: rt
+    categories: [news]
+    disabled: false
+    
+  # 6. Associated Press
+  - name: ap
+    engine: xpath
+    search_url: https://apnews.com/search?q={query}
+    url_xpath: //div[@class="PagePromo"]//a/@href
+    title_xpath: //div[@class="PagePromo"]//h3/text()
+    content_xpath: //div[@class="PagePromo"]//p/text()
+    shortcut: ap
+    categories: [news]
+    disabled: false
+    
+  # 7. The Guardian
+  - name: guardian
+    engine: xpath
+    search_url: https://www.theguardian.com/search?q={query}
+    url_xpath: //a[@data-link-name="article"]/@href
+    title_xpath: //span[@class="js-headline-text"]/text()
+    content_xpath: //div[@class="fc-item__standfirst"]/text()
+    shortcut: gd
+    categories: [news]
+    disabled: false
+    
+  # 8. Bloomberg
+  - name: bloomberg
+    engine: xpath
+    search_url: https://www.bloomberg.com/search?query={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//a/text()
+    content_xpath: //article//p/text()
+    shortcut: bb
+    categories: [news]
+    disabled: false
+    
+  # 9. CNBC
+  - name: cnbc
+    engine: xpath
+    search_url: https://www.cnbc.com/search/?query={query}
+    url_xpath: //div[@class="SearchResult-searchResult"]//a/@href
+    title_xpath: //div[@class="SearchResult-searchResultTitle"]/text()
+    content_xpath: //div[@class="SearchResult-searchResultBody"]/text()
+    shortcut: cnbc
+    categories: [news]
+    disabled: false
+    
+  # 10. Fox News
+  - name: foxnews
+    engine: xpath
+    search_url: https://www.foxnews.com/search-results/search?q={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: fox
+    categories: [news]
+    disabled: false
+    
+  # 11. NHK
+  - name: nhk
+    engine: xpath
+    search_url: https://www3.nhk.or.jp/nhkworld/en/search/?q={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: nhk
+    categories: [news]
+    disabled: false
+    
+  # 12. Deutsche Welle
+  - name: dw
+    engine: xpath
+    search_url: https://www.dw.com/search/?searchNavigationId=9097&languageCode=en&item={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: dw
+    categories: [news]
+    disabled: false
+    
+  # 13. France 24
+  - name: france24
+    engine: xpath
+    search_url: https://www.france24.com/en/search/{query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: f24
+    categories: [news]
+    disabled: false
+    
+  # 14. Washington Post
+  - name: washingtonpost
+    engine: xpath
+    search_url: https://www.washingtonpost.com/search?query={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: wp
+    categories: [news]
+    disabled: false
+    
+  # 15. Wall Street Journal
+  - name: wsj
+    engine: xpath
+    search_url: https://www.wsj.com/search?query={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: wsj
+    categories: [news]
+    disabled: false
+    
+  # 16. USA Today
+  - name: usatoday
+    engine: xpath
+    search_url: https://www.usatoday.com/search/{query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: usa
+    categories: [news]
+    disabled: false
+    
+  # 17. Sky News
+  - name: skynews
+    engine: xpath
+    search_url: https://news.sky.com/search?q={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: sky
+    categories: [news]
+    disabled: false
+    
+  # 18. Times of India
+  - name: timesofindia
+    engine: xpath
+    search_url: https://timesofindia.indiatimes.com/topic/{query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: toi
+    categories: [news]
+    disabled: false
+    
+  # 19. South China Morning Post
+  - name: scmp
+    engine: xpath
+    search_url: https://www.scmp.com/search/{query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: scmp
+    categories: [news]
+    disabled: false
+    
+  # 20. El País
+  - name: elpais
+    engine: xpath
+    search_url: https://elpais.com/buscador/?q={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: ep
+    categories: [news]
+    disabled: false
+    
+  # ============================================================================
+  # Crypto News Media (Top 20)
+  # ============================================================================
+  
+  # 1. CoinDesk
+  - name: coindesk
+    engine: xpath
+    search_url: https://www.coindesk.com/search?s={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h6/text()
+    content_xpath: //article//p/text()
+    shortcut: cd
+    categories: [news]
+    disabled: false
+    
+  # 2. Cointelegraph
+  - name: cointelegraph
+    engine: xpath
+    search_url: https://cointelegraph.com/search?query={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//span[@class="post-card-inline__title"]/text()
+    content_xpath: //article//p[@class="post-card-inline__text"]/text()
+    shortcut: ct
+    categories: [news]
+    disabled: false
+    
+  # 3. CryptoSlate
+  - name: cryptoslate
+    engine: xpath
+    search_url: https://cryptoslate.com/?s={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: cs
+    categories: [news]
+    disabled: false
+    
+  # 4. The Block
+  - name: theblock
+    engine: xpath
+    search_url: https://www.theblock.co/search?query={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: tb
+    categories: [news]
+    disabled: false
+    
+  # 5. Decrypt
+  - name: decrypt
+    engine: xpath
+    search_url: https://decrypt.co/search?q={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: dc
+    categories: [news]
+    disabled: false
+    
+  # 6. Bitcoin Magazine
+  - name: bitcoinmagazine
+    engine: xpath
+    search_url: https://bitcoinmagazine.com/search?q={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: btcmag
+    categories: [news]
+    disabled: false
+    
+  # 7. NewsBTC
+  - name: newsbtc
+    engine: xpath
+    search_url: https://www.newsbtc.com/?s={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: nbtc
+    categories: [news]
+    disabled: false
+    
+  # 8. CryptoPotato
+  - name: cryptopotato
+    engine: xpath
+    search_url: https://cryptopotato.com/?s={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: cp
+    categories: [news]
+    disabled: false
+    
+  # 9. BeInCrypto
+  - name: beincrypto
+    engine: xpath
+    search_url: https://beincrypto.com/?s={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: bic
+    categories: [news]
+    disabled: false
+    
+  # 10. U.Today
+  - name: utoday
+    engine: xpath
+    search_url: https://u.today/search?query={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: ut
+    categories: [news]
+    disabled: false
+    
+  # 11. AMB Crypto
+  - name: ambcrypto
+    engine: xpath
+    search_url: https://ambcrypto.com/?s={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: amb
+    categories: [news]
+    disabled: false
+    
+  # 12. Crypto Briefing
+  - name: cryptobriefing
+    engine: xpath
+    search_url: https://cryptobriefing.com/?s={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: cb
+    categories: [news]
+    disabled: false
+    
+  # 13. Bitcoinist
+  - name: bitcoinist
+    engine: xpath
+    search_url: https://bitcoinist.com/?s={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: btcn
+    categories: [news]
+    disabled: false
+    
+  # 14. Blockworks
+  - name: blockworks
+    engine: xpath
+    search_url: https://blockworks.co/search?q={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: bw
+    categories: [news]
+    disabled: false
+    
+  # 15. CoinJournal
+  - name: coinjournal
+    engine: xpath
+    search_url: https://coinjournal.net/?s={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: cj
+    categories: [news]
+    disabled: false
+    
+  # 16. Crypto News
+  - name: cryptonews
+    engine: xpath
+    search_url: https://cryptonews.com/?s={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: cn
+    categories: [news]
+    disabled: false
+    
+  # 17. CoinGape
+  - name: coingape
+    engine: xpath
+    search_url: https://coingape.com/?s={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: cg
+    categories: [news]
+    disabled: false
+    
+  # 18. CryptoRank
+  - name: cryptorank
+    engine: xpath
+    search_url: https://cryptorank.io/search?query={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h3/text()
+    content_xpath: //article//p/text()
+    shortcut: cr
+    categories: [news]
+    disabled: false
+    
+  # 19. Crypto Daily
+  - name: cryptodaily
+    engine: xpath
+    search_url: https://cryptodaily.co.uk/search?q={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: cdaily
+    categories: [news]
+    disabled: false
+    
+  # 20. The Crypto Times
+  - name: cryptotimes
+    engine: xpath
+    search_url: https://www.cryptotimes.io/?s={query}
+    url_xpath: //article//a/@href
+    title_xpath: //article//h2/text()
+    content_xpath: //article//p/text()
+    shortcut: ctimes
+    categories: [news]
+    disabled: false
+    
+  # ============================================================================
+  # Additional Sources
+  # ============================================================================
+  
+  # CoinMarketCap
+  - name: coinmarketcap
+    engine: xpath
+    search_url: https://coinmarketcap.com/search?q={query}
+    url_xpath: //a[@class="cmc-link"]/@href
+    title_xpath: //a[@class="cmc-link"]/text()
+    content_xpath: //p[@class="sc-4984dd93-0"]/text()
+    shortcut: cmc
+    disabled: false
+    categories: [general]
+    
+  # Google News
+  - name: google news
+    engine: google_news
+    shortcut: gn
+    disabled: false
+    categories: [news]
+    
+  # Bing News
+  - name: bing news
+    engine: bing_news
+    shortcut: bn
+    disabled: false
+    categories: [news]

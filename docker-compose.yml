@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  rabit-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rabit-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DRIFT_RPC_URL=${DRIFT_RPC_URL:-https://api.mainnet-beta.solana.com}
+      - DRIFT_PROGRAM_ID=${DRIFT_PROGRAM_ID:-dRiftyHA39MWEi3m9aunc5MzRF1JYJjb5ciH7N27eNn}
+      - WS_HOST=0.0.0.0
+      - WS_PORT=8000
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEBUG=${DEBUG:-true}
+      - MEM0_ENABLED=${MEM0_ENABLED:-true}
+      - MEM0_HOST=${MEM0_HOST:-mem0}
+      - MEM0_PORT=${MEM0_PORT:-8080}
+    volumes:
+      - .:/app
+      - /app/__pycache__
+    networks:
+      - rabit-network
+    restart: unless-stopped
+    depends_on:
+      - mem0
+      - qdrant
+
+  # Mem0 - User Memory Service
+  mem0:
+    image: mem0ai/mem0:latest
+    container_name: rabit-mem0
+    ports:
+      - "8080:8080"
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+    networks:
+      - rabit-network
+    restart: unless-stopped
+    depends_on:
+      - qdrant
+
+  # Qdrant - Vector Database for Mem0
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: rabit-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - rabit-network
+    restart: unless-stopped
+
+  # SearXNG - Self-Hosted Search Engine
+  searxng:
+    image: searxng/searxng:latest
+    container_name: rabit-searxng
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888/
+    networks:
+      - rabit-network
+    restart: unless-stopped
+
+networks:
+  rabit-network:
+    driver: bridge
+
+volumes:
+  qdrant_data:
