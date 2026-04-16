@@ -77,6 +77,12 @@ Selamat datang di dokumentasi Rabit Backend! Ini adalah index lengkap untuk semu
     - Research assistant
     - Custom assistants
 
+11. **[Context Implementation](agents/CONTEXT_IMPLEMENTATION.md)** - Trading context management
+    - Exchange selection (drift/backpack)
+    - Trading modes (global/asset-locked)
+    - Context API
+    - Integration guide
+
 ### 📊 [WebSocket & Real-time Data](websocket/)
 
 11. **[WebSocket Structure](websocket/WS_STRUCTURE.md)** - WebSocket module overview
@@ -196,6 +202,16 @@ Selamat datang di dokumentasi Rabit Backend! Ini adalah index lengkap untuk semu
     - API endpoints
     - Mobile optimization
 
+32. **[Implementation Summary](development/IMPLEMENTATION_SUMMARY.md)** - Recent implementations
+    - Feature summaries
+    - Technical details
+    - Integration notes
+
+33. **[Documentation Reorganization](development/DOCUMENTATION_REORGANIZATION.md)** - Docs structure
+    - Documentation changes
+    - File organization
+    - Migration notes
+
 ## 🎯 Quick Navigation
 
 ### For New Users
@@ -303,7 +319,7 @@ Selamat datang di dokumentasi Rabit Backend! Ini adalah index lengkap untuk semu
 
 ## 📊 Documentation Statistics
 
-- **Total Documents**: 31+
+- **Total Documents**: 33+
 - **Categories**: 8 (Getting Started, Architecture, API, Agents, WebSocket, Integrations, Tools, Development)
 - **Total Pages**: ~200+ pages
 - **Code Examples**: 100+
@@ -313,7 +329,8 @@ Selamat datang di dokumentasi Rabit Backend! Ini adalah index lengkap untuk semu
 ## 🔄 Documentation Updates
 
 ### Recent Updates (2026-04-16)
-- ✅ **Reorganized documentation structure** - 8 categories
+- ✅ **Added Trading Context Management** - Exchange & asset tracking
+- ✅ **Reorganized documentation structure** - Moved files to subfolders
 - ✅ Added main [Documentation README](README.md)
 - ✅ Added README for Drift, Binance, Backpack modules
 - ✅ Added Backpack Exchange integration

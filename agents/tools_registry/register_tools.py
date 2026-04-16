@@ -12,6 +12,16 @@ from agents.tools.news_tools import (
     stop_news_monitoring,
     get_monitoring_status
 )
+from agents.tools.tradingview_tools import register_tradingview_tools
+from agents.tools.price_monitor_tools import (
+    add_price_alert,
+    remove_price_alert,
+    list_price_alerts,
+    get_price_alert,
+    get_price_monitor_stats,
+    start_price_monitor,
+    stop_price_monitor
+)
 
 logger = get_logger(__name__)
 
@@ -232,4 +242,117 @@ def register_trading_tools():
         function=get_monitoring_status
     ))
     
-    logger.info("Registered 9 trading tools: get_price, web_search, get_latest_news, search_news_by_keywords, get_trending_news, search_news_by_symbols, start_news_monitoring, stop_news_monitoring, get_monitoring_status")
+    # ===== PRICE MONITORING TOOLS =====
+    
+    # Register add_price_alert
+    tool_registry.register(ToolDefinition(
+        name="add_price_alert",
+        description="Add price alert for validation/invalidation monitoring. Perfect for trade setups - get notified when price validates (confirms) or invalidates (rejects) your trade idea. For LONG: validation_price > current > invalidation_price. For SHORT: validation_price < current < invalidation_price. Choose exchange: drift (default), backpack, or binance.",
+        parameters=[
+            ToolParameter(
+                name="symbol",
+                type="string",
+                description="Trading symbol (BTC, ETH, SOL, etc.)",
+                required=True
+            ),
+            ToolParameter(
+                name="validation_price",
+                type="number",
+                description="Price level that validates the trade setup (confirms trade is working)",
+                required=True
+            ),
+            ToolParameter(
+                name="invalidation_price",
+                type="number",
+                description="Price level that invalidates the trade setup (stop loss level)",
+                required=True
+            ),
+            ToolParameter(
+                name="direction",
+                type="string",
+                description="Trade direction: LONG (bullish) or SHORT (bearish). Default: LONG",
+                required=False
+            ),
+            ToolParameter(
+                name="exchange",
+                type="string",
+                description="Exchange to monitor: drift (default), backpack, or binance",
+                required=False
+            )
+        ],
+        function=add_price_alert
+    ))
+    
+    # Register remove_price_alert
+    tool_registry.register(ToolDefinition(
+        name="remove_price_alert",
+        description="Remove price alert by ID. Use list_price_alerts to get alert IDs.",
+        parameters=[
+            ToolParameter(
+                name="alert_id",
+                type="string",
+                description="Alert ID to remove",
+                required=True
+            )
+        ],
+        function=remove_price_alert
+    ))
+    
+    # Register list_price_alerts
+    tool_registry.register(ToolDefinition(
+        name="list_price_alerts",
+        description="List all price alerts with details. Shows active and triggered alerts, separated by validation/invalidation status. Use to check which trade setups are being monitored.",
+        parameters=[
+            ToolParameter(
+                name="active_only",
+                type="boolean",
+                description="Only return non-triggered alerts (default: false)",
+                required=False
+            )
+        ],
+        function=list_price_alerts
+    ))
+    
+    # Register get_price_alert
+    tool_registry.register(ToolDefinition(
+        name="get_price_alert",
+        description="Get specific price alert details by ID. Shows validation/invalidation prices, current status, and trigger information if already triggered.",
+        parameters=[
+            ToolParameter(
+                name="alert_id",
+                type="string",
+                description="Alert ID",
+                required=True
+            )
+        ],
+        function=get_price_alert
+    ))
+    
+    # Register get_price_monitor_stats
+    tool_registry.register(ToolDefinition(
+        name="get_price_monitor_stats",
+        description="Get price monitor statistics and status. Shows if monitor is running, number of active alerts, total validations/invalidations triggered, and price check count.",
+        parameters=[],
+        function=get_price_monitor_stats
+    ))
+    
+    # Register start_price_monitor
+    tool_registry.register(ToolDefinition(
+        name="start_price_monitor",
+        description="Start price monitoring. Monitor will poll prices every 10 seconds and alert when validation or invalidation levels are reached. Must be started before alerts will trigger.",
+        parameters=[],
+        function=start_price_monitor
+    ))
+    
+    # Register stop_price_monitor
+    tool_registry.register(ToolDefinition(
+        name="stop_price_monitor",
+        description="Stop price monitoring. Alerts will not trigger while monitor is stopped.",
+        parameters=[],
+        function=stop_price_monitor
+    ))
+    
+    # Register TradingView tools
+    register_tradingview_tools()
+    
+    logger.info("Registered 33 trading tools: 9 market/news tools + 7 price monitor tools + 17 TradingView chart tools")

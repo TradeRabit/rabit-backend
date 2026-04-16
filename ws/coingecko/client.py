@@ -173,3 +173,5 @@ def get_coingecko_client() -> CoinGeckoClient:
     if _coingecko_client is None:
         _coingecko_client = CoinGeckoClient()
     return _coingecko_client
+
+

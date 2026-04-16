@@ -1,0 +1,26 @@
+{
+  "name": "Rabit Trading Agent",
+  "version": "1.0.0",
+  "model": "claude-3-5-sonnet-20241022",
+  "temperature": 0.7,
+  "max_tokens": 4096,
+  "tools_enabled": true,
+  "memory_enabled": true,
+  "compression_enabled": true,
+  "features": {
+    "price_monitoring": true,
+    "news_monitoring": true,
+    "chart_analysis": true,
+    "web_search": true
+  },
+  "limits": {
+    "max_alerts": 50,
+    "max_news_keywords": 10,
+    "max_concurrent_monitors": 5
+  },
+  "defaults": {
+    "exchange": "drift",
+    "poll_interval": 10,
+    "news_poll_interval": 300
+  }
+}

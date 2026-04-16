@@ -1,6 +1,6 @@
 """Test error handling for tools - verify AI gets informative errors"""
 import asyncio
-from agents.examples import register_trading_tools
+from agents.tools_registry import register_trading_tools
 from agents.tools import tool_registry
 
 

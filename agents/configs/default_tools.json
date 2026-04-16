@@ -1,0 +1,82 @@
+{
+  "enabled_tools": [
+    "get_price",
+    "web_search",
+    "get_latest_news",
+    "search_news_by_keywords",
+    "add_price_alert",
+    "list_price_alerts",
+    "start_price_monitor",
+    "tv_get_state",
+    "tv_set_symbol",
+    "tv_set_timeframe"
+  ],
+  "tool_categories": {
+    "market_data": [
+      "get_price"
+    ],
+    "news": [
+      "get_latest_news",
+      "search_news_by_keywords",
+      "get_trending_news",
+      "search_news_by_symbols",
+      "start_news_monitoring",
+      "stop_news_monitoring",
+      "get_monitoring_status"
+    ],
+    "price_monitoring": [
+      "add_price_alert",
+      "remove_price_alert",
+      "list_price_alerts",
+      "get_price_alert",
+      "get_price_monitor_stats",
+      "start_price_monitor",
+      "stop_price_monitor"
+    ],
+    "chart_analysis": [
+      "tv_get_state",
+      "tv_set_symbol",
+      "tv_set_timeframe",
+      "tv_set_chart_type",
+      "tv_scroll_to_date",
+      "tv_get_quote",
+      "tv_get_ohlcv",
+      "tv_get_indicator_values",
+      "tv_add_indicator",
+      "tv_remove_indicator",
+      "tv_set_indicator_inputs",
+      "tv_draw_line",
+      "tv_draw_horizontal_line",
+      "tv_clear_drawings",
+      "tv_create_alert",
+      "tv_list_alerts",
+      "tv_delete_alert",
+      "tv_capture_screenshot"
+    ],
+    "web": [
+      "web_search"
+    ]
+  },
+  "tool_permissions": {
+    "read_only": [
+      "get_price",
+      "get_latest_news",
+      "list_price_alerts",
+      "tv_get_state",
+      "tv_get_quote"
+    ],
+    "write": [
+      "add_price_alert",
+      "remove_price_alert",
+      "tv_set_symbol",
+      "tv_add_indicator",
+      "tv_draw_line"
+    ],
+    "monitor": [
+      "start_price_monitor",
+      "stop_price_monitor",
+      "start_news_monitoring",
+      "stop_news_monitoring"
+    ]
+  }
+}
