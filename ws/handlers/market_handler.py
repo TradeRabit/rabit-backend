@@ -1,7 +1,9 @@
 """Market data event handlers"""
 from typing import Dict, List, Callable, Optional
+import asyncio
 from utils.logger import get_logger
 from ws.models import PriceUpdate, OHLCData, MarketData
+from ws.database import get_ohlc_database
 
 logger = get_logger(__name__)
 
@@ -9,11 +11,19 @@ logger = get_logger(__name__)
 class MarketDataHandler:
     """Handle market data events from WebSocket"""
     
-    def __init__(self):
-        """Initialize market data handler"""
+    def __init__(self, auto_save_ohlc: bool = True):
+        """
+        Initialize market data handler
+        
+        Args:
+            auto_save_ohlc: Automatically save OHLC data to database
+        """
         self.price_data: Dict[str, PriceUpdate] = {}
-        self.ohlc_data: Dict[str, List[OHLCData]] = {}
+        self.ohlc_data: Dict[str, Dict[str, List[OHLCData]]] = {}  # symbol -> interval -> candles
         self.listeners: Dict[str, List[Callable]] = {}
+        self.auto_save_ohlc = auto_save_ohlc
+        self.db = get_ohlc_database() if auto_save_ohlc else None
+        self.exchange_source: Optional[str] = None  # Track which exchange is sending data
     
     async def on_price_update(self, price_update: PriceUpdate):
         """
@@ -34,28 +44,44 @@ class MarketDataHandler:
         except Exception as e:
             logger.error(f"Error handling price update: {str(e)}")
     
-    async def on_ohlc_update(self, ohlc_data: OHLCData):
+    async def on_ohlc_update(self, ohlc_data: OHLCData, interval: str = "1h"):
         """
-        Handle OHLC update from Binance
+        Handle OHLC update from Backpack, Binance, or Drift
         
         Args:
             ohlc_data: OHLC data
+            interval: Candle interval (e.g., '1m', '5m', '1h', '1d')
         """
         try:
             symbol = ohlc_data.symbol
             
+            # Store by interval
             if symbol not in self.ohlc_data:
-                self.ohlc_data[symbol] = []
+                self.ohlc_data[symbol] = {}
             
-            # Keep last 100 candles
-            self.ohlc_data[symbol].append(ohlc_data)
-            if len(self.ohlc_data[symbol]) > 100:
-                self.ohlc_data[symbol].pop(0)
+            if interval not in self.ohlc_data[symbol]:
+                self.ohlc_data[symbol][interval] = []
             
-            logger.debug(f"OHLC update: {symbol} = {ohlc_data.close}")
+            # Keep last 1000 candles per interval
+            self.ohlc_data[symbol][interval].append(ohlc_data)
+            if len(self.ohlc_data[symbol][interval]) > 1000:
+                self.ohlc_data[symbol][interval].pop(0)
+            
+            logger.debug(f"OHLC update: {symbol} ({interval}) = {ohlc_data.close}")
+            
+            # Auto-save to database
+            if self.auto_save_ohlc and self.db and self.exchange_source:
+                self.db.save_candles(
+                    symbol=symbol,
+                    exchange=self.exchange_source,
+                    interval=interval,
+                    candles=[ohlc_data],
+                    merge=True
+                )
             
             # Notify listeners
-            await self._notify_listeners(f"ohlc:{symbol}", ohlc_data)
+            await self._notify_listeners(f"ohlc:{symbol}:{interval}", ohlc_data)
+            await self._notify_listeners(f"ohlc:{symbol}", ohlc_data)  # Also notify generic
         
         except Exception as e:
             logger.error(f"Error handling OHLC update: {str(e)}")
@@ -119,18 +145,29 @@ class MarketDataHandler:
         """
         return self.price_data.get(symbol)
     
-    def get_ohlc(self, symbol: str, limit: Optional[int] = None) -> List[OHLCData]:
+    def get_ohlc(self, symbol: str, interval: Optional[str] = None, limit: Optional[int] = None) -> List[OHLCData]:
         """
         Get OHLC data for a symbol
         
         Args:
             symbol: Trading symbol
+            interval: Specific interval (e.g., "1h", "1d") or None for realtime
             limit: Number of candles to return
             
         Returns:
             List of OHLC data
         """
-        data = self.ohlc_data.get(symbol, [])
+        if symbol not in self.ohlc_data:
+            return []
+        
+        # If interval specified, get that specific interval
+        if interval and interval in self.ohlc_data[symbol]:
+            data = self.ohlc_data[symbol][interval]
+        # Otherwise get realtime data
+        elif "realtime" in self.ohlc_data[symbol]:
+            data = self.ohlc_data[symbol]["realtime"]
+        else:
+            return []
         
         if limit:
             return data[-limit:]
@@ -141,9 +178,19 @@ class MarketDataHandler:
         """Get all price data"""
         return self.price_data.copy()
     
-    def get_all_ohlc(self) -> Dict[str, List[OHLCData]]:
+    def get_all_ohlc(self) -> Dict[str, Dict[str, List[OHLCData]]]:
         """Get all OHLC data"""
         return self.ohlc_data.copy()
+    
+    def set_exchange_source(self, exchange: str):
+        """
+        Set the exchange source for auto-saving OHLC data
+        
+        Args:
+            exchange: Exchange name ('binance', 'backpack', 'drift')
+        """
+        self.exchange_source = exchange.lower()
+        logger.info(f"Set exchange source for OHLC auto-save: {self.exchange_source}")
 
 
 # Import asyncio for async check

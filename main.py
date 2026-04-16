@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from config.settings import settings
 from api.routes import router
 from ws.services import get_market_service
+from ws.handlers import MarketDataHandler
 
 # Setup logging
 logging.basicConfig(
@@ -20,6 +21,10 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+# Global handler instance
+market_handler = MarketDataHandler()
 
 
 # ============================================================================
@@ -48,11 +53,37 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error initializing coins: {e}")
     
-    # Start Drift WS (optional - uncomment when ready)
-    # logger.info("Starting Drift WebSocket...")
-    # handler = MarketDataHandler()
-    # drift_client = DriftWSClient(handler)
-    # asyncio.create_task(drift_client.connect())
+    # Start WebSocket service based on PRICE_SOURCE setting
+    price_source = settings.PRICE_SOURCE.lower()
+    logger.info(f"Price source: {price_source}")
+    
+    if price_source == "backpack" and settings.BACKPACK_ENABLED:
+        logger.info("Starting Backpack WebSocket service...")
+        try:
+            from ws.backpack import get_backpack_service
+            backpack_service = get_backpack_service()
+            await backpack_service.start(market_handler)
+            logger.info("Backpack WebSocket service started")
+        except Exception as e:
+            logger.error(f"Failed to start Backpack service: {e}")
+    
+    elif price_source == "drift":
+        logger.info("Starting Drift WebSocket service...")
+        try:
+            from ws.drift import DriftWSClient
+            drift_client = DriftWSClient()
+            await drift_client.connect()
+            
+            # Subscribe to assets
+            for symbol in settings.DRIFT_ASSETS[:settings.DRIFT_SUBSCRIBE_ASSETS]:
+                await drift_client.subscribe(symbol, market_handler.on_price_update)
+            
+            logger.info("Drift WebSocket service started")
+        except Exception as e:
+            logger.error(f"Failed to start Drift service: {e}")
+    
+    else:
+        logger.warning(f"Unknown price source: {price_source}")
     
     logger.info("Rabit Backend started successfully!")
     
@@ -60,6 +91,16 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down Rabit Backend...")
+    
+    # Stop WebSocket services
+    if price_source == "backpack":
+        try:
+            from ws.backpack import get_backpack_service
+            backpack_service = get_backpack_service()
+            await backpack_service.stop()
+        except Exception as e:
+            logger.error(f"Error stopping Backpack service: {e}")
+    
     logger.info("Rabit Backend stopped")
 
 

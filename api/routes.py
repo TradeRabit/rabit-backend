@@ -51,8 +51,9 @@ async def get_assets(
     - List of assets with symbol, name, price, and 24h change
     """
     try:
+        from main import market_handler
+        
         service = get_market_service()
-        handler = MarketDataHandler()
         
         # Get all symbols from TRADING_ASSETS config
         symbols = settings.TRADING_ASSETS
@@ -64,7 +65,7 @@ async def get_assets(
                 coin_info = await service.get_coin_info(symbol)
                 
                 # Get price data
-                price_update = handler.get_price(symbol)
+                price_update = market_handler.get_price(symbol)
                 
                 if coin_info and price_update:
                     # Filter by category if provided
@@ -108,8 +109,9 @@ async def get_asset_detail(symbol: str):
     - Complete asset information including price, stats, description, and links
     """
     try:
+        from main import market_handler
+        
         service = get_market_service()
-        handler = MarketDataHandler()
         
         symbol = symbol.upper()
         
@@ -122,7 +124,7 @@ async def get_asset_detail(symbol: str):
             )
         
         # Get price data
-        price_update = handler.get_price(symbol)
+        price_update = market_handler.get_price(symbol)
         if not price_update:
             raise HTTPException(
                 status_code=404,
@@ -180,7 +182,8 @@ async def get_asset_detail(symbol: str):
 async def get_ohlc_data(
     symbol: str,
     interval: str = Query("1h", description="Interval (1m, 5m, 15m, 1h, 4h, 1d)"),
-    limit: int = Query(100, description="Number of candles to return")
+    limit: int = Query(100, description="Number of candles to return"),
+    source: str = Query("auto", description="Data source: 'backpack', 'binance', or 'auto'")
 ):
     """
     Get OHLC data for TradingView chart.
@@ -189,6 +192,7 @@ async def get_ohlc_data(
     - `symbol`: Asset symbol (e.g., 'BTC', 'ETH')
     - `interval`: Candle interval (1m, 5m, 15m, 1h, 4h, 1d)
     - `limit`: Number of candles (default: 100, max: 1000)
+    - `source`: Data source ('backpack', 'binance', or 'auto')
     
     **Returns:**
     - OHLC data array for charting
@@ -206,22 +210,42 @@ async def get_ohlc_data(
         if limit > 1000:
             limit = 1000
         
-        # Get OHLC data from Binance
-        downloader = BinanceHistoryDownloader()
-        ohlc_data = await downloader.download_history(
-            symbol=symbol.upper(),
-            interval=interval,
-            limit=limit
-        )
+        symbol = symbol.upper()
+        ohlc_data = []
         
-        if not ohlc_data:
-            raise HTTPException(
-                status_code=404,
-                detail=f"OHLC data for '{symbol}' not available"
+        # Determine source
+        if source == "auto":
+            source = settings.PRICE_SOURCE
+        
+        # Try to get from WebSocket handler first (real-time data)
+        if source == "backpack" and settings.BACKPACK_ENABLED:
+            from main import market_handler
+            ohlc_data = market_handler.get_ohlc(symbol, interval=interval, limit=limit)
+            
+            # If not enough data from WebSocket, fallback to Binance
+            if len(ohlc_data) < limit:
+                logger.info(f"Not enough OHLC data from Backpack, falling back to Binance")
+                source = "binance"
+        
+        # Get from Binance if needed
+        if not ohlc_data or source == "binance":
+            downloader = BinanceHistoryDownloader()
+            binance_data = await downloader.download_history(
+                symbol=symbol,
+                interval=interval,
+                limit=limit
             )
+            
+            if not binance_data:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"OHLC data for '{symbol}' not available"
+                )
+            
+            ohlc_data = binance_data
         
         return {
-            "symbol": symbol.upper(),
+            "symbol": symbol,
             "interval": interval,
             "data": ohlc_data
         }
@@ -291,7 +315,7 @@ async def websocket_prices(websocket: WebSocket):
     """
     await manager.connect(websocket)
     
-    handler = MarketDataHandler()
+    from main import market_handler
     
     # Subscribe to all price updates
     async def on_price_update(price_update):
@@ -308,7 +332,7 @@ async def websocket_prices(websocket: WebSocket):
             logger.error(f"Error in price update callback: {e}")
     
     # Subscribe to price updates
-    handler.subscribe("price:*", on_price_update)
+    market_handler.subscribe("price:*", on_price_update)
     
     try:
         while True:

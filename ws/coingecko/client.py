@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import logging
 
 from ws.models.coin_info import CoinInfo, CoinLinks
+from ws.utils.categories import normalize_categories
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,7 @@ class CoinGeckoClient:
                 description=description,
                 links=links,
                 contract_address=contract_address,
-                categories=data.get("categories", []),
+                categories=normalize_categories(data.get("categories", [])),  # Normalize categories
                 last_updated=datetime.utcnow()
             )
             

@@ -10,8 +10,12 @@ pydantic-settings>=2.0.0
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 
+# Exchange SDKs
 # Solana & Drift (install separately if needed)
 # driftpy>=0.1.0
+
+# Backpack Exchange SDK
+bpx-py>=1.1.4
 
 # Additional utilities
 tiktoken>=0.5.0

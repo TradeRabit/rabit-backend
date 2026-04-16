@@ -236,19 +236,48 @@ Lihat [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) untuk dokumentasi l
 
 ## 📚 Documentation
 
-Dokumentasi lengkap tersedia di folder `docs/`:
+**📖 [Complete Documentation Hub →](docs/README.md)**
 
-- [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) - **API documentation lengkap**
-- [docs/QUICKSTART.md](docs/QUICKSTART.md) - Panduan cepat memulai
-- [docs/FEATURES.md](docs/FEATURES.md) - Dokumentasi fitur lengkap
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Arsitektur sistem
-- [docs/AGENTS_STRUCTURE.md](docs/AGENTS_STRUCTURE.md) - Struktur modul agents
-- [docs/WS_STRUCTURE.md](docs/WS_STRUCTURE.md) - Struktur modul WebSocket
-- [docs/COINGECKO_INTEGRATION.md](docs/COINGECKO_INTEGRATION.md) - Integrasi CoinGecko
-- [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) - Arsitektur data sources
-- [docs/MOBILE_DATA_REQUIREMENTS.md](docs/MOBILE_DATA_REQUIREMENTS.md) - Requirements mobile app
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - Panduan development
-- [docs/IMPLEMENTATION_CHECKLIST.md](docs/IMPLEMENTATION_CHECKLIST.md) - Checklist implementasi
+Dokumentasi lengkap telah direorganisasi dengan struktur yang lebih rapi:
+
+### Quick Links
+
+#### 🚀 Getting Started
+- **[Quick Start Guide](docs/getting-started/QUICKSTART.md)** - Get up and running in 5 minutes
+- **[Features Overview](docs/getting-started/FEATURES.md)** - Explore what Rabit can do
+
+#### 📡 API & Integration
+- **[API Reference](docs/api/API_REFERENCE.md)** - Complete API documentation
+- **[WebSocket Structure](docs/websocket/WS_STRUCTURE.md)** - Real-time data integration
+
+#### 🤖 AI Agents
+- **[Agent Structure](docs/agents/AGENTS_STRUCTURE.md)** - AI agent system
+- **[Assistant Types](docs/agents/ASSISTANT_TYPES.md)** - Different assistant types
+
+#### 📊 Data Sources
+- **[Backpack Exchange](docs/websocket/BACKPACK_INTEGRATION.md)** - Backpack integration
+- **[CoinGecko Integration](docs/integrations/COINGECKO_INTEGRATION.md)** - Coin information
+- **[Data Sources Overview](docs/websocket/DATA_SOURCES.md)** - All data sources
+
+#### 💻 Development
+- **[Development Guide](docs/development/DEVELOPMENT.md)** - Development workflow
+- **[Implementation Checklist](docs/development/IMPLEMENTATION_CHECKLIST.md)** - Feature tracking
+
+### Documentation Categories
+
+```
+docs/
+├── getting-started/    # Quick start & features
+├── architecture/       # System design
+├── api/               # API reference
+├── agents/            # AI agents
+├── websocket/         # Real-time data
+├── integrations/      # Third-party services
+├── tools/             # Available tools
+└── development/       # Dev guides
+```
+
+**[→ Browse All Documentation](docs/README.md)** | **[→ Complete Index](docs/DOCS_INDEX.md)**
 
 ## 🎯 Frontend Integration
 

@@ -1,41 +1,31 @@
-# Documentation Index
+# 📑 Complete Documentation Index
 
-Selamat datang di dokumentasi Rabit Backend! Berikut adalah panduan lengkap untuk navigasi dokumentasi.
+Selamat datang di dokumentasi Rabit Backend! Ini adalah index lengkap untuk semua dokumentasi.
+
+> **💡 Tip**: Untuk navigasi yang lebih mudah, lihat [Main Documentation](README.md)
+
+---
 
 ## 📚 Documentation Structure
 
-### 🚀 Getting Started
+### 🚀 [Getting Started](getting-started/)
 
-1. **[../README.md](../README.md)** - Start here!
-   - Project overview
-   - Quick setup instructions
-   - Basic usage examples
-   - Docker setup
-
-2. **[QUICKSTART.md](QUICKSTART.md)** - 5-minute setup
+1. **[Quick Start Guide](getting-started/QUICKSTART.md)** - 5-minute setup
    - Step-by-step setup guide
    - Example code snippets
    - Common use cases
    - Troubleshooting tips
 
-### 📖 Core Documentation
-
-3. **[FEATURES.md](FEATURES.md)** - Feature documentation
+2. **[Features Overview](getting-started/FEATURES.md)** - Feature documentation
    - Auto conversation compression
    - Memory management (scoped & global)
    - Tool calling system
    - Detailed error handling
    - Usage examples
 
-4. **[API_REFERENCE.md](API_REFERENCE.md)** - Complete API reference
-   - Agent classes
-   - Memory classes
-   - Compression classes
-   - Tool classes
-   - Example tools
-   - Error handling
+### 🏗️ [Architecture](architecture/)
 
-5. **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture
+3. **[System Architecture](architecture/ARCHITECTURE.md)** - System architecture
    - Architecture diagrams
    - Data flow diagrams
    - Component details
@@ -43,135 +33,296 @@ Selamat datang di dokumentasi Rabit Backend! Berikut adalah panduan lengkap untu
    - Design patterns
    - Scalability considerations
 
-### 🛠️ Development
-
-6. **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development guide
-   - Development workflow
-   - Coding standards
-   - Common tasks
-   - Testing guide
-   - Debugging tips
-   - Best practices
-
-7. **[IMPLEMENTATION_CHECKLIST.md](IMPLEMENTATION_CHECKLIST.md)** - Progress tracking
-   - Completed features
-   - Pending features
-   - Sprint goals
-   - Progress metrics
-   - Known issues
-
-8. **[PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)** - Project overview
+4. **[Project Summary](architecture/PROJECT_SUMMARY.md)** - Project overview
    - Project statistics
    - Key components
    - Configuration
    - Usage examples
    - Next steps
 
+5. **[Restructure Summary](architecture/RESTRUCTURE_SUMMARY.md)** - Recent changes
+   - Architectural changes
+   - Migration guide
+   - Breaking changes
+
+### 📡 [API Reference](api/)
+
+6. **[API Reference](api/API_REFERENCE.md)** - Complete API reference
+   - Agent classes
+   - Memory classes
+   - Compression classes
+   - Tool classes
+   - Example tools
+   - Error handling
+
+7. **[API Documentation](api/API_DOCUMENTATION.md)** - Additional API details
+   - Endpoint documentation
+   - Request/response formats
+   - Authentication
+
+### 🤖 [Agents](agents/)
+
+8. **[Agent Structure](agents/AGENTS_STRUCTURE.md)** - Agent module organization
+   - Module structure
+   - Agent types
+   - Creating custom agents
+
+9. **[Agent Visual Guide](agents/AGENTS_VISUAL.md)** - Visual representation
+   - Architecture diagrams
+   - Flow charts
+   - Component relationships
+
+10. **[Assistant Types](agents/ASSISTANT_TYPES.md)** - Different assistant types
+    - Trading assistant
+    - Research assistant
+    - Custom assistants
+
+### 📊 [WebSocket & Real-time Data](websocket/)
+
+11. **[WebSocket Structure](websocket/WS_STRUCTURE.md)** - WebSocket module overview
+    - Module organization
+    - Data sources (Drift, Backpack, Binance, CoinGecko)
+    - Models and handlers
+    - Usage examples
+
+12. **[Data Sources](websocket/DATA_SOURCES.md)** - All available data sources
+    - Exchange integrations
+    - API integrations
+    - Data formats
+
+13. **[Trading Assets](websocket/TRADING_ASSETS.md)** - Supported trading assets
+    - Available symbols
+    - Asset categories
+    - Market coverage
+
+#### Backpack Exchange
+14. **[Backpack Integration](websocket/BACKPACK_INTEGRATION.md)** - Complete guide
+    - WebSocket protocol
+    - Data mapping
+    - Use cases
+    - Best practices
+
+15. **[Backpack Quick Start](websocket/BACKPACK_QUICKSTART.md)** - 5-minute setup
+    - Quick examples
+    - Common use cases
+    - Troubleshooting
+
+16. **[Backpack Implementation](websocket/BACKPACK_IMPLEMENTATION_SUMMARY.md)** - Implementation details
+    - Technical details
+    - Architecture decisions
+    - Testing
+
+17. **[WebSocket Implementation](websocket/WS_IMPLEMENTATION_SUMMARY.md)** - Overall WS implementation
+    - Implementation summary
+    - Architecture overview
+
+### � [Integrations](integrations/)
+
+#### Data & APIs
+18. **[CoinGecko Integration](integrations/COINGECKO_INTEGRATION.md)** - Coin information API
+    - API integration
+    - Database caching
+    - Rate limiting
+
+19. **[News Monitoring](integrations/NEWS_MONITORING.md)** - Real-time news tracking
+    - News sources
+    - AI sentiment analysis
+    - WebSocket broadcasting
+
+20. **[News Sources](integrations/NEWS_SOURCES.md)** - Available news sources
+    - Source list
+    - Configuration
+    - API details
+
+21. **[Web Search](integrations/WEB_SEARCH.md)** - Web search capabilities
+    - Search integration
+    - Usage examples
+
+#### AI & Memory
+22. **[OpenRouter Integration](integrations/OPENROUTER_INTEGRATION.md)** - AI model routing
+    - Model selection
+    - Configuration
+    - Usage examples
+
+23. **[OpenRouter Caching](integrations/OPENROUTER_CACHING.md)** - Prompt caching
+    - Cache configuration
+    - Performance optimization
+
+24. **[OpenRouter Models](integrations/OPENROUTER_MODELS.md)** - Available models
+    - Model list
+    - Capabilities
+    - Pricing
+
+25. **[Mem0 Integration](integrations/MEM0_INTEGRATION.md)** - User memory management
+    - Memory types
+    - Configuration
+    - Usage examples
+
+26. **[Session Persistence](integrations/SESSION_PERSISTENCE.md)** - Session management
+    - Session storage
+    - State management
+
+### 🛠️ [Tools](tools/)
+
+27. **[Get Price Tool](tools/GET_PRICE_TOOL.md)** - Real-time price fetching
+    - Usage examples
+    - Supported exchanges
+    - Data format
+
+28. **[Tools Summary](tools/TOOLS_SUMMARY.md)** - All available tools
+    - Tool list
+    - Capabilities
+    - Usage guide
+
+### 💻 [Development](development/)
+
+29. **[Development Guide](development/DEVELOPMENT.md)** - Complete development workflow
+    - Development setup
+    - Coding standards
+    - Common tasks
+    - Testing guide
+    - Debugging tips
+    - Best practices
+
+30. **[Implementation Checklist](development/IMPLEMENTATION_CHECKLIST.md)** - Feature tracking
+    - Completed features
+    - Pending features
+    - Sprint goals
+    - Progress metrics
+    - Known issues
+
+31. **[Mobile Data Requirements](development/MOBILE_DATA_REQUIREMENTS.md)** - Mobile app specs
+    - Data requirements
+    - API endpoints
+    - Mobile optimization
+
 ## 🎯 Quick Navigation
 
 ### For New Users
-1. Start with [README.md](README.md)
-2. Follow [QUICKSTART.md](QUICKSTART.md)
-3. Read [FEATURES.md](FEATURES.md)
-4. Check [API_REFERENCE.md](API_REFERENCE.md) when needed
+1. Start with [Main Documentation](README.md)
+2. Follow [Quick Start Guide](getting-started/QUICKSTART.md)
+3. Read [Features Overview](getting-started/FEATURES.md)
+4. Check [API Reference](api/API_REFERENCE.md) when needed
 
 ### For Developers
-1. Read [DEVELOPMENT.md](DEVELOPMENT.md)
-2. Study [ARCHITECTURE.md](ARCHITECTURE.md)
-3. Check [IMPLEMENTATION_CHECKLIST.md](IMPLEMENTATION_CHECKLIST.md)
-4. Refer to [API_REFERENCE.md](API_REFERENCE.md)
+1. Read [Development Guide](development/DEVELOPMENT.md)
+2. Study [System Architecture](architecture/ARCHITECTURE.md)
+3. Check [Implementation Checklist](development/IMPLEMENTATION_CHECKLIST.md)
+4. Refer to [API Reference](api/API_REFERENCE.md)
 
 ### For Contributors
-1. Read [DEVELOPMENT.md](DEVELOPMENT.md)
-2. Check [IMPLEMENTATION_CHECKLIST.md](IMPLEMENTATION_CHECKLIST.md)
-3. Follow coding standards in [DEVELOPMENT.md](DEVELOPMENT.md)
+1. Read [Development Guide](development/DEVELOPMENT.md)
+2. Check [Implementation Checklist](development/IMPLEMENTATION_CHECKLIST.md)
+3. Follow coding standards in [Development Guide](development/DEVELOPMENT.md)
 4. Update relevant documentation
 
 ### For Project Managers
-1. Read [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)
-2. Check [IMPLEMENTATION_CHECKLIST.md](IMPLEMENTATION_CHECKLIST.md)
-3. Review [ARCHITECTURE.md](ARCHITECTURE.md)
+1. Read [Project Summary](architecture/PROJECT_SUMMARY.md)
+2. Check [Implementation Checklist](development/IMPLEMENTATION_CHECKLIST.md)
+3. Review [System Architecture](architecture/ARCHITECTURE.md)
 
 ## 📋 Documentation by Topic
 
 ### Agent System
-- [FEATURES.md](FEATURES.md) - Agent features overview
-- [API_REFERENCE.md](API_REFERENCE.md) - BaseAgent API
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Agent architecture
-- [DEVELOPMENT.md](DEVELOPMENT.md) - Creating custom agents
-- [AGENTS_STRUCTURE.md](AGENTS_STRUCTURE.md) - Agent module organization
-- [GET_PRICE_TOOL.md](GET_PRICE_TOOL.md) - Real-time price tool documentation
+- [Features Overview](getting-started/FEATURES.md) - Agent features overview
+- [API Reference](api/API_REFERENCE.md) - BaseAgent API
+- [System Architecture](architecture/ARCHITECTURE.md) - Agent architecture
+- [Development Guide](development/DEVELOPMENT.md) - Creating custom agents
+- [Agent Structure](agents/AGENTS_STRUCTURE.md) - Agent module organization
+- [Get Price Tool](tools/GET_PRICE_TOOL.md) - Real-time price tool documentation
+
+### WebSocket & Real-time Data
+- [WebSocket Structure](websocket/WS_STRUCTURE.md) - WebSocket module overview
+- [Backpack Integration](websocket/BACKPACK_INTEGRATION.md) - Backpack Exchange integration
+- [Backpack Quick Start](websocket/BACKPACK_QUICKSTART.md) - Backpack quick start
+- [CoinGecko Integration](integrations/COINGECKO_INTEGRATION.md) - CoinGecko API integration
+- [News Monitoring](integrations/NEWS_MONITORING.md) - News monitoring system
+- [Data Sources](websocket/DATA_SOURCES.md) - All data sources overview
 
 ### Memory Management
-- [FEATURES.md](FEATURES.md) - Memory features
-- [API_REFERENCE.md](API_REFERENCE.md) - Memory API
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Memory architecture
-- [DEVELOPMENT.md](DEVELOPMENT.md) - Using memory
+- [Features Overview](getting-started/FEATURES.md) - Memory features
+- [API Reference](api/API_REFERENCE.md) - Memory API
+- [System Architecture](architecture/ARCHITECTURE.md) - Memory architecture
+- [Development Guide](development/DEVELOPMENT.md) - Using memory
+- [Mem0 Integration](integrations/MEM0_INTEGRATION.md) - Mem0 integration
 
 ### Tool System
-- [FEATURES.md](FEATURES.md) - Tool system overview
-- [API_REFERENCE.md](API_REFERENCE.md) - Tool API
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Tool architecture
-- [DEVELOPMENT.md](DEVELOPMENT.md) - Creating tools
+- [Features Overview](getting-started/FEATURES.md) - Tool system overview
+- [API Reference](api/API_REFERENCE.md) - Tool API
+- [System Architecture](architecture/ARCHITECTURE.md) - Tool architecture
+- [Development Guide](development/DEVELOPMENT.md) - Creating tools
+- [Tools Summary](tools/TOOLS_SUMMARY.md) - All tools
 
 ### Compression
-- [FEATURES.md](FEATURES.md) - Compression features
-- [API_REFERENCE.md](API_REFERENCE.md) - Compression API
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Compression flow
+- [Features Overview](getting-started/FEATURES.md) - Compression features
+- [API Reference](api/API_REFERENCE.md) - Compression API
+- [System Architecture](architecture/ARCHITECTURE.md) - Compression flow
 
 ### Configuration
-- [README.md](README.md) - Basic configuration
-- [QUICKSTART.md](QUICKSTART.md) - Environment setup
-- [DEVELOPMENT.md](DEVELOPMENT.md) - Adding configuration
+- [Main README](../README.md) - Basic configuration
+- [Quick Start Guide](getting-started/QUICKSTART.md) - Environment setup
+- [Development Guide](development/DEVELOPMENT.md) - Adding configuration
 
 ### Testing
-- [QUICKSTART.md](QUICKSTART.md) - Running tests
-- [DEVELOPMENT.md](DEVELOPMENT.md) - Writing tests
-- [IMPLEMENTATION_CHECKLIST.md](IMPLEMENTATION_CHECKLIST.md) - Test coverage
+- [Quick Start Guide](getting-started/QUICKSTART.md) - Running tests
+- [Development Guide](development/DEVELOPMENT.md) - Writing tests
+- [Implementation Checklist](development/IMPLEMENTATION_CHECKLIST.md) - Test coverage
 
 ### Deployment
-- [README.md](README.md) - Docker setup
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Scalability
-- [IMPLEMENTATION_CHECKLIST.md](IMPLEMENTATION_CHECKLIST.md) - Deployment status
+- [Main README](../README.md) - Docker setup
+- [System Architecture](architecture/ARCHITECTURE.md) - Scalability
+- [Implementation Checklist](development/IMPLEMENTATION_CHECKLIST.md) - Deployment status
 
 ## 🔍 Search by Keyword
 
 ### Setup & Installation
-- [README.md](README.md) - Main setup
-- [QUICKSTART.md](QUICKSTART.md) - Quick setup
-- [DEVELOPMENT.md](DEVELOPMENT.md) - Dev setup
+- [Main README](../README.md) - Main setup
+- [Quick Start Guide](getting-started/QUICKSTART.md) - Quick setup
+- [Development Guide](development/DEVELOPMENT.md) - Dev setup
 
 ### Usage Examples
-- [README.md](README.md) - Basic examples
-- [QUICKSTART.md](QUICKSTART.md) - Quick examples
-- [FEATURES.md](FEATURES.md) - Feature examples
-- [API_REFERENCE.md](API_REFERENCE.md) - API examples
+- [Main README](../README.md) - Basic examples
+- [Quick Start Guide](getting-started/QUICKSTART.md) - Quick examples
+- [Features Overview](getting-started/FEATURES.md) - Feature examples
+- [API Reference](api/API_REFERENCE.md) - API examples
 
 ### API Documentation
-- [API_REFERENCE.md](API_REFERENCE.md) - Complete API reference
+- [API Reference](api/API_REFERENCE.md) - Complete API reference
+- [API Documentation](api/API_DOCUMENTATION.md) - Additional details
 
 ### Architecture & Design
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture
-- [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) - Project structure
+- [System Architecture](architecture/ARCHITECTURE.md) - System architecture
+- [Project Summary](architecture/PROJECT_SUMMARY.md) - Project structure
 
 ### Development Guide
-- [DEVELOPMENT.md](DEVELOPMENT.md) - Complete dev guide
+- [Development Guide](development/DEVELOPMENT.md) - Complete dev guide
 
 ### Progress & Status
-- [IMPLEMENTATION_CHECKLIST.md](IMPLEMENTATION_CHECKLIST.md) - Implementation status
-- [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) - Project overview
+- [Implementation Checklist](development/IMPLEMENTATION_CHECKLIST.md) - Implementation status
+- [Project Summary](architecture/PROJECT_SUMMARY.md) - Project overview
 
 ## 📊 Documentation Statistics
 
-- **Total Documents**: 9
-- **Total Pages**: ~100+ pages
-- **Code Examples**: 50+
-- **Diagrams**: 5+
-- **Last Updated**: 2026-04-14
+- **Total Documents**: 31+
+- **Categories**: 8 (Getting Started, Architecture, API, Agents, WebSocket, Integrations, Tools, Development)
+- **Total Pages**: ~200+ pages
+- **Code Examples**: 100+
+- **Diagrams**: 10+
+- **Last Updated**: 2026-04-16
 
 ## 🔄 Documentation Updates
 
-### Recent Updates (2026-04-14)
+### Recent Updates (2026-04-16)
+- ✅ **Reorganized documentation structure** - 8 categories
+- ✅ Added main [Documentation README](README.md)
+- ✅ Added README for Drift, Binance, Backpack modules
+- ✅ Added Backpack Exchange integration
+- ✅ Added Backpack quick start guide
+- ✅ Updated WebSocket structure documentation
+- ✅ Added comprehensive data source documentation
+- ✅ Updated requirements.txt with bpx-py
+
+### Previous Updates (2026-04-14)
 - ✅ Created complete documentation set
 - ✅ Added architecture diagrams
 - ✅ Added API reference
@@ -253,17 +404,32 @@ Selamat datang di dokumentasi Rabit Backend! Berikut adalah panduan lengkap untu
 
 ---
 
-**Last Updated**: 2026-04-14
-**Version**: 1.0.0
+**Last Updated**: 2026-04-16  
+**Version**: 2.0.0  
 **Maintained by**: Rabit Backend Team
 
 ## 📝 Quick Links
 
-- [Main README](README.md)
-- [Quick Start](QUICKSTART.md)
-- [Features](FEATURES.md)
-- [API Reference](API_REFERENCE.md)
-- [Architecture](ARCHITECTURE.md)
-- [Development Guide](DEVELOPMENT.md)
-- [Implementation Status](IMPLEMENTATION_CHECKLIST.md)
-- [Project Summary](PROJECT_SUMMARY.md)
+### Essential Docs
+- [Main Documentation](README.md) - Start here!
+- [Quick Start Guide](getting-started/QUICKSTART.md)
+- [Features Overview](getting-started/FEATURES.md)
+- [API Reference](api/API_REFERENCE.md)
+- [System Architecture](architecture/ARCHITECTURE.md)
+- [Development Guide](development/DEVELOPMENT.md)
+
+### WebSocket & Data
+- [WebSocket Structure](websocket/WS_STRUCTURE.md)
+- [Backpack Integration](websocket/BACKPACK_INTEGRATION.md)
+- [Backpack Quick Start](websocket/BACKPACK_QUICKSTART.md)
+- [Data Sources](websocket/DATA_SOURCES.md)
+
+### Integrations
+- [CoinGecko](integrations/COINGECKO_INTEGRATION.md)
+- [OpenRouter](integrations/OPENROUTER_INTEGRATION.md)
+- [Mem0](integrations/MEM0_INTEGRATION.md)
+- [News Monitoring](integrations/NEWS_MONITORING.md)
+
+### Development
+- [Implementation Checklist](development/IMPLEMENTATION_CHECKLIST.md)
+- [Project Summary](architecture/PROJECT_SUMMARY.md)

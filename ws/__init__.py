@@ -1,5 +1,6 @@
 """WebSocket integration module"""
 from ws.drift import DriftWSClient
+from ws.backpack import BackpackWSClient
 from ws.binance import BinanceClient, BinanceHistoryDownloader
 from ws.models import MarketData, OHLCData, PriceUpdate, CoinInfo, CoinLinks
 from ws.handlers import MarketDataHandler
@@ -8,6 +9,7 @@ from ws.services import MarketDataService, get_market_service
 
 __all__ = [
     "DriftWSClient",
+    "BackpackWSClient",
     "BinanceClient",
     "BinanceHistoryDownloader",
     "MarketData",

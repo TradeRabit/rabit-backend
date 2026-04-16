@@ -34,6 +34,15 @@ class Settings:
     # Use TRADING_ASSETS for Drift (backward compatibility)
     DRIFT_ASSETS = TRADING_ASSETS
     
+    # Backpack Exchange
+    BACKPACK_WS_URL = os.getenv("BACKPACK_WS_URL", "wss://ws.backpack.exchange")
+    BACKPACK_ENABLED = os.getenv("BACKPACK_ENABLED", "true").lower() == "true"
+    BACKPACK_QUOTE_ASSET = os.getenv("BACKPACK_QUOTE_ASSET", "USDC")  # SOL_USDC, BTC_USDC
+    BACKPACK_SUBSCRIBE_ASSETS = int(os.getenv("BACKPACK_SUBSCRIBE_ASSETS", "25"))
+    
+    # Price Source Selection
+    PRICE_SOURCE = os.getenv("PRICE_SOURCE", "backpack")  # "drift" or "backpack"
+    
     # Binance Configuration
     BINANCE_API_URL = os.getenv("BINANCE_API_URL", "https://api.binance.com")
     BINANCE_WS_URL = os.getenv("BINANCE_WS_URL", "wss://stream.binance.com:9443/ws")

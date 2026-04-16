@@ -8,16 +8,30 @@ ws/
 ├── drift/                      # Drift Protocol WebSocket
 │   ├── __init__.py
 │   └── client.py              # DriftWSClient
+├── backpack/                   # Backpack Exchange WebSocket
+│   ├── __init__.py
+│   └── client.py              # BackpackWSClient
 ├── binance/                    # Binance OHLC data
 │   ├── __init__.py
 │   ├── client.py              # BinanceClient
 │   └── history.py             # BinanceHistoryDownloader
+├── coingecko/                  # CoinGecko API
+│   ├── __init__.py
+│   ├── client.py              # CoinGeckoClient
+│   └── database.py            # CoinDatabase
 ├── models/                     # Data models
 │   ├── __init__.py
-│   └── market_data.py         # PriceUpdate, OHLCData, MarketData
-└── handlers/                   # Event handlers
+│   ├── market_data.py         # PriceUpdate, OHLCData, MarketData
+│   └── coin_info.py           # CoinInfo, CoinLinks
+├── handlers/                   # Event handlers
+│   ├── __init__.py
+│   └── market_handler.py      # MarketDataHandler
+├── services/                   # Service layer
+│   ├── __init__.py
+│   └── market_service.py      # MarketDataService
+└── news/                       # News monitoring
     ├── __init__.py
-    └── market_handler.py      # MarketDataHandler
+    └── monitor.py             # NewsMonitor
 ```
 
 ## 🎯 Module Organization by Feature
@@ -45,6 +59,35 @@ from ws.drift import DriftWSClient
 - `volume_24h` - 24-hour trading volume
 - `open_interest` - Open interest
 - `funding_rate` - Current funding rate (1h)
+
+### 1.5. **Backpack Module** (`ws/backpack/`)
+**Purpose**: Real-time market data from Backpack Exchange
+
+**Files**:
+- `client.py` - BackpackWSClient class
+
+**Exports**:
+```python
+from ws.backpack import BackpackWSClient
+```
+
+**Features**:
+- Subscribe to unlimited symbols (rate limited)
+- Real-time price updates via ticker stream
+- Trade stream for frequent updates
+- 24h statistics (high, low, volume, change)
+- Async callbacks for price updates
+
+**Data Fields**:
+- `price` - Current price (lastPrice)
+- `change_24h` - 24-hour price change %
+- `volume_24h` - 24-hour trading volume
+- `high_24h` - 24-hour high
+- `low_24h` - 24-hour low
+- `open_interest` - Not available (None)
+- `funding_rate` - Not available (None)
+
+**Symbol Format**: `BASE_QUOTE` (e.g., `SOL_USDC`, `BTC_USDC`)
 
 ### 2. **Binance Module** (`ws/binance/`)
 **Purpose**: OHLC data for charting (TradingView compatible)
@@ -114,12 +157,18 @@ from ws.handlers import MarketDataHandler
 ```python
 from ws import (
     DriftWSClient,
+    BackpackWSClient,
     BinanceClient,
     BinanceHistoryDownloader,
     MarketData,
     OHLCData,
     PriceUpdate,
-    MarketDataHandler
+    CoinInfo,
+    CoinLinks,
+    MarketDataHandler,
+    CoinGeckoClient,
+    CoinDatabase,
+    MarketDataService
 )
 ```
 
@@ -128,14 +177,26 @@ from ws import (
 # Drift
 from ws.drift import DriftWSClient
 
+# Backpack
+from ws.backpack import BackpackWSClient
+
 # Binance
 from ws.binance import BinanceClient, BinanceHistoryDownloader
 
+# CoinGecko
+from ws.coingecko import CoinGeckoClient, get_coingecko_client, CoinDatabase, get_coin_database
+
 # Models
-from ws.models import MarketData, OHLCData, PriceUpdate
+from ws.models import MarketData, OHLCData, PriceUpdate, CoinInfo, CoinLinks
 
 # Handlers
 from ws.handlers import MarketDataHandler
+
+# Services
+from ws.services import MarketDataService, get_market_service
+
+# News
+from ws.news import NewsMonitor, get_news_monitor
 ```
 
 ## 📊 Configuration
@@ -199,6 +260,29 @@ await drift_client.subscribe("SOL", handler.on_price_update)
 
 # Disconnect
 await drift_client.disconnect()
+```
+
+### 1.5. Subscribe to Backpack Price Updates
+
+```python
+from ws import BackpackWSClient, MarketDataHandler
+
+# Initialize
+backpack_client = BackpackWSClient()
+handler = MarketDataHandler()
+
+# Connect
+await backpack_client.connect()
+
+# Subscribe to price updates
+async def on_price_update(price_update):
+    print(f"{price_update.symbol}: ${price_update.price}")
+    print(f"24h Change: {price_update.change_24h}%")
+
+await backpack_client.subscribe("SOL_USDC", handler.on_price_update)
+
+# Disconnect
+await backpack_client.disconnect()
 ```
 
 ### 2. Subscribe to Binance OHLC

@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 from config.settings import settings
 from utils.logger import get_logger
 from ws.models import OHLCData
+from ws.database import get_ohlc_database
+from ws.utils import get_interval_ms
 
 logger = get_logger(__name__)
 
@@ -13,11 +15,18 @@ logger = get_logger(__name__)
 class BinanceHistoryDownloader:
     """Download historical OHLC data from Binance"""
     
-    def __init__(self):
-        """Initialize Binance history downloader"""
+    def __init__(self, auto_save: bool = True):
+        """
+        Initialize Binance history downloader
+        
+        Args:
+            auto_save: Automatically save downloaded data to database
+        """
         self.api_url = settings.BINANCE_API_URL
         self.interval = settings.BINANCE_OHLC_INTERVAL
         self.limit = settings.BINANCE_OHLC_DOWNLOAD_LIMIT
+        self.auto_save = auto_save
+        self.db = get_ohlc_database() if auto_save else None
     
     async def download_ohlc(
         self,
@@ -86,6 +95,19 @@ class BinanceHistoryDownloader:
                             ohlc_list.append(ohlc)
                         
                         logger.info(f"Downloaded {len(ohlc_list)} candles for {symbol}")
+                        
+                        # Auto-save to database
+                        if self.auto_save and self.db and ohlc_list:
+                            # Extract base symbol (e.g., "SOLUSDT" -> "SOL")
+                            base_symbol = symbol.replace("USDT", "").replace("USDC", "").replace("BUSD", "")
+                            self.db.save_candles(
+                                symbol=base_symbol,
+                                exchange="binance",
+                                interval=self.interval,
+                                candles=ohlc_list,
+                                merge=True
+                            )
+                        
                         return ohlc_list
                     else:
                         logger.error(f"Error downloading OHLC data: {response.status}")
@@ -124,12 +146,4 @@ class BinanceHistoryDownloader:
     
     def get_interval_ms(self) -> int:
         """Get interval in milliseconds"""
-        intervals = {
-            "1m": 60 * 1000,
-            "5m": 5 * 60 * 1000,
-            "15m": 15 * 60 * 1000,
-            "1h": 60 * 60 * 1000,
-            "4h": 4 * 60 * 60 * 1000,
-            "1d": 24 * 60 * 60 * 1000,
-        }
-        return intervals.get(self.interval, 60 * 60 * 1000)
+        return get_interval_ms(self.interval)

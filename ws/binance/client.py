@@ -21,6 +21,7 @@ class BinanceClient:
         self.websocket = None
         self.callbacks: Dict[str, List[Callable]] = {}
         self.subscriptions: Dict[str, bool] = {}
+        self._listen_task = None
     
     async def connect(self):
         """Connect to Binance WebSocket"""
@@ -31,7 +32,7 @@ class BinanceClient:
             logger.info("Connected to Binance WebSocket")
             
             # Start listening for messages
-            asyncio.create_task(self._listen())
+            self._listen_task = asyncio.create_task(self._listen())
             
         except Exception as e:
             logger.error(f"Failed to connect to Binance WebSocket: {str(e)}")
@@ -41,6 +42,13 @@ class BinanceClient:
     async def disconnect(self):
         """Disconnect from Binance WebSocket"""
         try:
+            if self._listen_task:
+                self._listen_task.cancel()
+                try:
+                    await self._listen_task
+                except asyncio.CancelledError:
+                    pass
+
             if self.websocket:
                 await self.websocket.close()
             self.connected = False
@@ -121,6 +129,9 @@ class BinanceClient:
         except websockets.exceptions.ConnectionClosed:
             logger.warning("Binance WebSocket connection closed")
             self.connected = False
+        except asyncio.CancelledError:
+            logger.info("Listen task cancelled")
+            raise
         except Exception as e:
             logger.error(f"Error in listen loop: {str(e)}")
             self.connected = False
@@ -140,6 +151,7 @@ class BinanceClient:
             if "k" in data:  # OHLC data
                 kline = data["k"]
                 symbol = data["s"]
+                interval = kline.get("i", self.interval)  # Get interval from kline data
                 
                 # Create OHLC data
                 ohlc = OHLCData(
@@ -161,7 +173,13 @@ class BinanceClient:
                     for callback in self.callbacks[symbol]:
                         try:
                             if asyncio.iscoroutinefunction(callback):
-                                await callback(ohlc)
+                                # Pass interval to callback if it accepts it
+                                import inspect
+                                sig = inspect.signature(callback)
+                                if len(sig.parameters) >= 2:
+                                    await callback(ohlc, interval)
+                                else:
+                                    await callback(ohlc)
                             else:
                                 callback(ohlc)
                         except Exception as e:
