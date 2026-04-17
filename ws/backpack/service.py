@@ -76,6 +76,8 @@ class BackpackService:
                     
                 except Exception as e:
                     logger.error(f"Error subscribing to {symbol}: {e}")
+
+            self.client.start_listening()
             
             self.running = True
             logger.info(f"Backpack service started, subscribed to {len(settings.TRADING_ASSETS[:settings.BACKPACK_SUBSCRIBE_ASSETS])} assets")

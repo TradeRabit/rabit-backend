@@ -6,6 +6,8 @@ Provides free web search using ddgs library
 import logging
 from typing import List, Dict, Optional
 
+from config.settings import settings
+
 logger = logging.getLogger(__name__)
 
 # Try to import ddgs
@@ -25,10 +27,12 @@ class WebSearchClient:
     
     def __init__(self):
         """Initialize web search client"""
-        self.enabled = DDGS_AVAILABLE
+        self.enabled = DDGS_AVAILABLE and settings.WEB_SEARCH_ENABLED
         
         if self.enabled:
             logger.info("Web search enabled: DuckDuckGo")
+        elif not settings.WEB_SEARCH_ENABLED:
+            logger.info("Web search disabled by WEB_SEARCH_ENABLED=false")
         else:
             logger.warning("Web search disabled: duckduckgo-search not installed")
     
@@ -168,7 +172,11 @@ def web_search(query: str, max_results: int = 5) -> dict:
     if not client.enabled:
         return {
             "success": False,
-            "error": "Web search is disabled. Install: pip install ddgs",
+            "error": (
+                "Web search is disabled by configuration"
+                if not settings.WEB_SEARCH_ENABLED
+                else "Web search is disabled. Install: pip install ddgs"
+            ),
             "results": []
         }
     

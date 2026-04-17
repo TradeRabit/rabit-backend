@@ -1,9 +1,10 @@
 """Trading tools for Rabit Agent"""
 from agents.tools import tool_registry, ToolDefinition, ToolParameter
+from config.settings import settings
 from utils.logger import get_logger
 from ws.handlers import MarketDataHandler
-from agents.tools.web_search import web_search
-from agents.tools.news_tools import (
+from agents.tools.market.web_search import web_search
+from agents.tools.market.news_tools import (
     get_latest_news,
     search_news_by_keywords,
     get_trending_news,
@@ -12,8 +13,8 @@ from agents.tools.news_tools import (
     stop_news_monitoring,
     get_monitoring_status
 )
-from agents.tools.tradingview_tools import register_tradingview_tools
-from agents.tools.price_monitor_tools import (
+from agents.tools.market.tradingview_tools import register_tradingview_tools
+from agents.tools.market.price_monitor_tools import (
     add_price_alert,
     remove_price_alert,
     list_price_alerts,
@@ -22,6 +23,13 @@ from agents.tools.price_monitor_tools import (
     start_price_monitor,
     stop_price_monitor
 )
+from agents.tools.memory.mem0_tools import (
+    add_user_memory,
+    clear_user_memories,
+    delete_user_memory,
+    get_user_memory,
+)
+from agents.tools.ui.ui_stream_tools import show_hint, show_plan, show_thinking_summary
 
 logger = get_logger(__name__)
 
@@ -84,6 +92,7 @@ async def get_price(symbol: str) -> dict:
 
 def register_trading_tools():
     """Register trading tools to the registry"""
+    tool_registry.clear()
     
     # Register get_price
     tool_registry.register(ToolDefinition(
@@ -101,25 +110,26 @@ def register_trading_tools():
     ))
     
     # Register web_search
-    tool_registry.register(ToolDefinition(
-        name="web_search",
-        description="Search the web for information about crypto, markets, news, or any topic. Returns minimal results with title, URL, and brief snippet. Use for: market news, crypto analysis, price predictions, trading strategies, or general information.",
-        parameters=[
-            ToolParameter(
-                name="query",
-                type="string",
-                description="Search query (e.g., 'Bitcoin price prediction 2024', 'Ethereum news today', 'Solana DeFi projects')",
-                required=True
-            ),
-            ToolParameter(
-                name="max_results",
-                type="number",
-                description="Maximum number of results to return (default: 5, max: 10)",
-                required=False
-            )
-        ],
-        function=web_search
-    ))
+    if settings.WEB_SEARCH_ENABLED:
+        tool_registry.register(ToolDefinition(
+            name="web_search",
+            description="Search the web for information about crypto, markets, news, or any topic. Returns minimal results with title, URL, and brief snippet. Use for: market news, crypto analysis, price predictions, trading strategies, or general information.",
+            parameters=[
+                ToolParameter(
+                    name="query",
+                    type="string",
+                    description="Search query (e.g., 'Bitcoin price prediction 2024', 'Ethereum news today', 'Solana DeFi projects')",
+                    required=True
+                ),
+                ToolParameter(
+                    name="max_results",
+                    type="number",
+                    description="Maximum number of results to return (default: 5, max: 10)",
+                    required=False
+                )
+            ],
+            function=web_search
+        ))
     
     # Register get_latest_news
     tool_registry.register(ToolDefinition(
@@ -351,8 +361,144 @@ def register_trading_tools():
         parameters=[],
         function=stop_price_monitor
     ))
-    
+
+    # ===== LONG-TERM MEMORY TOOLS =====
+
+    if settings.MEMORY_TOOLS_ENABLED:
+        tool_registry.register(ToolDefinition(
+            name="add_user_memory",
+            description="Save a durable user preference, limit, or fact into long-term memory. Use for stable personal information the user explicitly wants remembered.",
+            parameters=[
+                ToolParameter(
+                    name="text",
+                    type="string",
+                    description="The durable memory to save for this user",
+                    required=True
+                ),
+                ToolParameter(
+                    name="category",
+                    type="string",
+                    description="Optional category label such as preference, balance_limit, risk, or profile",
+                    required=False
+                ),
+                ToolParameter(
+                    name="metadata_json",
+                    type="string",
+                    description="Optional JSON object string with extra metadata to store alongside the memory",
+                    required=False
+                ),
+            ],
+            function=add_user_memory
+        ))
+
+        tool_registry.register(ToolDefinition(
+            name="get_user_memory",
+            description="List or search the active user's long-term memories. Provide a query to search semantically, or omit it to retrieve recent stored memories.",
+            parameters=[
+                ToolParameter(
+                    name="query",
+                    type="string",
+                    description="Optional semantic search query for relevant memories",
+                    required=False
+                ),
+                ToolParameter(
+                    name="limit",
+                    type="number",
+                    description="Maximum number of memories to return (default: 5)",
+                    required=False
+                ),
+            ],
+            function=get_user_memory
+        ))
+
+        tool_registry.register(ToolDefinition(
+            name="delete_user_memory",
+            description="Delete a specific long-term memory by memory ID for the active user.",
+            parameters=[
+                ToolParameter(
+                    name="memory_id",
+                    type="string",
+                    description="The memory ID to delete",
+                    required=True
+                ),
+            ],
+            function=delete_user_memory
+        ))
+
+        tool_registry.register(ToolDefinition(
+            name="clear_user_memories",
+            description="Delete all long-term memories for the active user. Use only when the user clearly asks to wipe all saved memory.",
+            parameters=[],
+            function=clear_user_memories
+        ))
+
+    # ===== STREAM UI TOOLS =====
+
+    tool_registry.register(ToolDefinition(
+        name="show_thinking_summary",
+        description="Show one concise thinking summary to the frontend before or during a non-trivial task. Keep it brief and user-friendly.",
+        parameters=[
+            ToolParameter(
+                name="summary",
+                type="string",
+                description="A short, user-safe summary of what the agent is doing",
+                required=True,
+            ),
+        ],
+        function=show_thinking_summary,
+    ))
+
+    tool_registry.register(ToolDefinition(
+        name="show_plan",
+        description="Send a structured step-by-step execution plan to the frontend. Use when the task has multiple meaningful steps.",
+        parameters=[
+            ToolParameter(
+                name="name",
+                type="string",
+                description="The plan title shown in the UI",
+                required=True,
+            ),
+            ToolParameter(
+                name="status",
+                type="string",
+                description="Overall plan status: running, completed, or failed",
+                required=True,
+            ),
+            ToolParameter(
+                name="steps_json",
+                type="string",
+                description="JSON array string of plan steps with id, label, and status fields",
+                required=True,
+            ),
+        ],
+        function=show_plan,
+    ))
+
+    tool_registry.register(ToolDefinition(
+        name="show_hint",
+        description="Send a HITL multiple-choice prompt to the frontend when user confirmation or a branch decision is needed.",
+        parameters=[
+            ToolParameter(
+                name="title",
+                type="string",
+                description="The main hint/question title",
+                required=True,
+            ),
+            ToolParameter(
+                name="options_json",
+                type="string",
+                description="JSON array string of option objects with id and text",
+                required=True,
+            ),
+        ],
+        function=show_hint,
+    ))
+
     # Register TradingView tools
     register_tradingview_tools()
     
-    logger.info("Registered 33 trading tools: 9 market/news tools + 7 price monitor tools + 17 TradingView chart tools")
+    logger.info(
+        "Registered trading tools with gates: "
+        f"web_search={'on' if settings.WEB_SEARCH_ENABLED else 'off'}, "
+        f"memory_tools={'on' if settings.MEMORY_TOOLS_ENABLED else 'off'}"
+    )

@@ -19,5 +19,5 @@ COPY . .
 # Expose port
 EXPOSE 8000
 
-# Run application
-CMD ["python", "main.py"]
+# Run application without the development auto-reloader.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]

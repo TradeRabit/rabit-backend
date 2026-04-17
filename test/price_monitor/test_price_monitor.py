@@ -6,7 +6,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from agents.tools.price_monitor_tools import (
+from agents.tools.market.price_monitor_tools import (
     add_price_alert,
     remove_price_alert,
     list_price_alerts,

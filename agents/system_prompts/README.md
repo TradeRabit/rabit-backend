@@ -34,20 +34,22 @@ Risk management specialist prompt. Focused on capital preservation and risk asse
 ## Usage
 
 ```python
+from agents import TradingAgent
 from agents.system_prompts import get_trading_agent_prompt
 
-# Load prompt
+# Load prompt directly if you need it
 prompt = get_trading_agent_prompt()
 
-# Use in agent initialization
-agent = TradingAgent(system_prompt=prompt)
+# TradingAgent already loads trading_agent.txt by default
+agent = TradingAgent(scope_id="user_123")
 ```
 
 ## Adding New Prompts
 
 1. Create new `.txt` file in this folder
 2. Add loader function in `__init__.py`
-3. Update this README
+3. Use that loader from the corresponding agent class or factory
+4. Update this README
 
 ## Best Practices
 
@@ -56,3 +58,4 @@ agent = TradingAgent(system_prompt=prompt)
 - Include examples where helpful
 - Update prompts based on agent performance
 - Version control prompt changes
+- Keep prompts in plain text unless you truly need dynamic prompt generation in Python

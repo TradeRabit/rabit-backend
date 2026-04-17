@@ -3,7 +3,7 @@ Test Regex News Search
 Testing regex patterns separately
 """
 
-from agents.tools.news_tools import search_news_by_keywords
+from agents.tools.market.news_tools import search_news_by_keywords
 import time
 
 

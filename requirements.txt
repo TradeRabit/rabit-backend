@@ -9,6 +9,7 @@ pydantic-settings>=2.0.0
 # FastAPI & Web Server
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
+python-multipart>=0.0.9
 
 # Exchange SDKs
 # Solana & Drift (install separately if needed)

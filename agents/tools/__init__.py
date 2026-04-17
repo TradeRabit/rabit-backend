@@ -1,6 +1,6 @@
 """Tool system module"""
-from .registry import ToolRegistry, tool_registry
-from .definitions import ToolDefinition, ToolParameter, ToolResult
+from .core.definitions import ToolDefinition, ToolParameter, ToolResult
+from .core.registry import ToolRegistry, tool_registry
 
 __all__ = [
     "ToolRegistry",

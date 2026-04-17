@@ -2,12 +2,32 @@
 import asyncio
 import websockets
 import json
+from datetime import datetime
 from typing import Callable, Optional, List, Dict, Any
 from config.settings import settings
 from utils.logger import get_logger
 from ws.models import PriceUpdate, OHLCData
 
 logger = get_logger(__name__)
+
+
+BACKPACK_KLINE_INTERVALS = [
+    "1m",
+    "3m",
+    "5m",
+    "15m",
+    "30m",
+    "1h",
+    "2h",
+    "4h",
+    "6h",
+    "8h",
+    "12h",
+    "1d",
+    "3d",
+    "1w",
+    "1month",
+]
 
 
 class BackpackWSClient:
@@ -32,14 +52,15 @@ class BackpackWSClient:
             self.websocket = await websockets.connect(self.url)
             self.connected = True
             logger.info("Connected to Backpack WebSocket")
-            
-            # Start listening for messages
-            self._listen_task = asyncio.create_task(self._listen())
-            
         except Exception as e:
             logger.error(f"Failed to connect to Backpack WebSocket: {str(e)}")
             self.connected = False
             raise
+
+    def start_listening(self):
+        """Start the read loop after subscriptions are registered."""
+        if self._listen_task is None:
+            self._listen_task = asyncio.create_task(self._listen())
     
     async def disconnect(self):
         """Disconnect from Backpack WebSocket"""
@@ -70,6 +91,7 @@ class BackpackWSClient:
         """
         # Normalize symbol to base (e.g., "SOL_USDC" -> "SOL")
         base_symbol = symbol.split("_")[0] if "_" in symbol else symbol
+        base_symbol = base_symbol.upper()
         
         # Create Backpack symbol format (e.g., "SOL_USDC")
         backpack_symbol = f"{base_symbol}_{self.quote_asset}"
@@ -93,6 +115,7 @@ class BackpackWSClient:
             callback: Callback function for OHLC updates
         """
         base_symbol = symbol.split("_")[0] if "_" in symbol else symbol
+        base_symbol = base_symbol.upper()
         backpack_symbol = f"{base_symbol}_{self.quote_asset}"
         
         if backpack_symbol not in self.ohlc_callbacks:
@@ -134,22 +157,10 @@ class BackpackWSClient:
             
             # Add kline stream for OHLC data
             if subscribe_ohlc:
-                # All supported timeframes
-                streams.append(f"kline.{symbol}.1m")   # 1 minute
-                streams.append(f"kline.{symbol}.3m")   # 3 minutes
-                streams.append(f"kline.{symbol}.5m")   # 5 minutes
-                streams.append(f"kline.{symbol}.15m")  # 15 minutes
-                streams.append(f"kline.{symbol}.30m")  # 30 minutes
-                streams.append(f"kline.{symbol}.1h")   # 1 hour
-                streams.append(f"kline.{symbol}.2h")   # 2 hours
-                streams.append(f"kline.{symbol}.4h")   # 4 hours
-                streams.append(f"kline.{symbol}.6h")   # 6 hours
-                streams.append(f"kline.{symbol}.8h")   # 8 hours
-                streams.append(f"kline.{symbol}.12h")  # 12 hours
-                streams.append(f"kline.{symbol}.1d")   # 1 day
-                streams.append(f"kline.{symbol}.3d")   # 3 days
-                streams.append(f"kline.{symbol}.1w")   # 1 week
-                streams.append(f"kline.{symbol}.1M")   # 1 month
+                streams.extend(
+                    f"kline.{interval}.{symbol}"
+                    for interval in BACKPACK_KLINE_INTERVALS
+                )
             
             message = {
                 "method": "SUBSCRIBE",
@@ -168,22 +179,11 @@ class BackpackWSClient:
             streams = [
                 f"ticker.{symbol}",
                 f"trade.{symbol}",
-                f"kline.{symbol}.1m",
-                f"kline.{symbol}.3m",
-                f"kline.{symbol}.5m",
-                f"kline.{symbol}.15m",
-                f"kline.{symbol}.30m",
-                f"kline.{symbol}.1h",
-                f"kline.{symbol}.2h",
-                f"kline.{symbol}.4h",
-                f"kline.{symbol}.6h",
-                f"kline.{symbol}.8h",
-                f"kline.{symbol}.12h",
-                f"kline.{symbol}.1d",
-                f"kline.{symbol}.3d",
-                f"kline.{symbol}.1w",
-                f"kline.{symbol}.1M",
             ]
+            streams.extend(
+                f"kline.{interval}.{symbol}"
+                for interval in BACKPACK_KLINE_INTERVALS
+            )
             
             message = {
                 "method": "UNSUBSCRIBE",
@@ -258,37 +258,109 @@ class BackpackWSClient:
             if data.get("result") is not None:
                 logger.debug(f"Subscription confirmation: {data}")
                 return
-            
-            # Check if this is a stream data message
-            if "stream" not in data or "data" not in data:
+
+            # Legacy wrapper format
+            if "stream" in data and "data" in data:
+                stream = data.get("stream", "")
+                stream_data = data.get("data", {})
+                parts = stream.split(".")
+
+                if len(parts) < 2:
+                    return
+
+                stream_type = parts[0]
+
+                if stream_type == "kline":
+                    interval = parts[1] if len(parts) > 2 else "1h"
+                    symbol = parts[2] if len(parts) > 2 else parts[1]
+                    await self._handle_kline(symbol, interval, stream_data)
+                elif stream_type == "ticker":
+                    await self._handle_ticker(parts[1], stream_data)
+                elif stream_type == "trade":
+                    await self._handle_trade(parts[1], stream_data)
+
                 return
-            
-            stream = data.get("stream", "")
-            stream_data = data.get("data", {})
-            
-            # Parse stream name
-            parts = stream.split(".")
-            if len(parts) < 2:
+
+            # Current flattened format
+            stream_type = data.get("e")
+            symbol = data.get("s")
+
+            if not stream_type or not symbol:
                 return
-            
-            stream_type = parts[0]
-            symbol = parts[1]
-            
-            # Handle ticker stream (24h statistics)
+
             if stream_type == "ticker":
-                await self._handle_ticker(symbol, stream_data)
-            
-            # Handle trade stream (recent trades)
+                await self._handle_ticker(symbol, data)
             elif stream_type == "trade":
-                await self._handle_trade(symbol, stream_data)
-            
-            # Handle kline stream (OHLC data)
+                await self._handle_trade(symbol, data)
             elif stream_type == "kline":
-                interval = parts[2] if len(parts) > 2 else "1h"
-                await self._handle_kline(symbol, interval, stream_data)
+                interval = self._extract_kline_interval(data)
+                await self._handle_kline(symbol, interval, data)
         
         except Exception as e:
             logger.error(f"Error handling message: {str(e)}")
+
+    @staticmethod
+    def _extract_kline_interval(data: Dict[str, Any]) -> str:
+        """Extract kline interval from flattened or legacy payload."""
+        interval = data.get("interval") or data.get("i")
+        if interval:
+            return interval
+
+        return "1h"
+
+    @staticmethod
+    def _parse_float_value(raw_value: Any) -> Optional[float]:
+        """Parse numeric websocket values without crashing on partial payloads."""
+        if raw_value is None:
+            return None
+
+        if isinstance(raw_value, (int, float)):
+            return float(raw_value)
+
+        if isinstance(raw_value, str):
+            value = raw_value.strip()
+            if not value:
+                return None
+            return float(value)
+
+        return None
+
+    @classmethod
+    def _parse_float_field(cls, data: Dict[str, Any], *keys: str, default: Optional[float] = None) -> Optional[float]:
+        for key in keys:
+            if key in data:
+                parsed = cls._parse_float_value(data.get(key))
+                if parsed is not None:
+                    return parsed
+        return default
+
+    @staticmethod
+    def _parse_timestamp_ms(raw_value: Any) -> int:
+        """Normalize Backpack timestamps into milliseconds."""
+        if raw_value is None:
+            return 0
+
+        if isinstance(raw_value, (int, float)):
+            value = int(raw_value)
+            # Backpack docs use microseconds for websocket timestamps.
+            return value // 1000 if value > 10**12 else value
+
+        if isinstance(raw_value, str):
+            value = raw_value.strip()
+            if not value:
+                return 0
+
+            if value.isdigit():
+                parsed = int(value)
+                return parsed // 1000 if parsed > 10**12 else parsed
+
+            try:
+                dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                return int(dt.timestamp() * 1000)
+            except ValueError:
+                return 0
+
+        return 0
     
     async def _handle_ticker(self, symbol: str, data: Dict[str, Any]):
         """
@@ -307,11 +379,17 @@ class BackpackWSClient:
             base_symbol = symbol.split("_")[0] if "_" in symbol else symbol
             
             # Parse ticker data
-            last_price = float(data.get("lastPrice", 0))
-            price_change_percent = float(data.get("priceChangePercent", 0))
-            volume = float(data.get("volume", 0))
-            high_24h = float(data.get("high", 0))
-            low_24h = float(data.get("low", 0))
+            last_price = self._parse_float_field(data, "lastPrice", "c", default=0.0) or 0.0
+            high_24h = self._parse_float_field(data, "high", "h", default=0.0) or 0.0
+            low_24h = self._parse_float_field(data, "low", "l", default=0.0) or 0.0
+            volume = self._parse_float_field(data, "quoteVolume", "V", "volume", "v", default=0.0) or 0.0
+
+            price_change_percent = data.get("priceChangePercent")
+            if price_change_percent is None:
+                open_price = self._parse_float_field(data, "open", "o", default=0.0) or 0.0
+                price_change_percent = ((last_price - open_price) / open_price * 100) if open_price else None
+            else:
+                price_change_percent = self._parse_float_value(price_change_percent)
             
             # Create price update
             price_update = PriceUpdate(
@@ -355,7 +433,9 @@ class BackpackWSClient:
             base_symbol = symbol.split("_")[0] if "_" in symbol else symbol
             
             # Parse trade data
-            price = float(data.get("price", 0))
+            price = self._parse_float_field(data, "price", "p")
+            if price is None:
+                return
             
             # Create minimal price update from trade
             price_update = PriceUpdate(
@@ -398,12 +478,21 @@ class BackpackWSClient:
             base_symbol = symbol.split("_")[0] if "_" in symbol else symbol
             
             # Parse kline data
-            timestamp = int(data.get("startTime", 0))
-            open_price = float(data.get("open", 0))
-            high_price = float(data.get("high", 0))
-            low_price = float(data.get("low", 0))
-            close_price = float(data.get("close", 0))
-            volume = float(data.get("volume", 0))
+            timestamp = self._parse_timestamp_ms(data.get("startTime", data.get("t")))
+            open_price = self._parse_float_field(data, "open", "o")
+            high_price = self._parse_float_field(data, "high", "h")
+            low_price = self._parse_float_field(data, "low", "l")
+            close_price = self._parse_float_field(data, "close", "c")
+            volume = self._parse_float_field(data, "volume", "v", default=0.0) or 0.0
+
+            if None in (open_price, high_price, low_price, close_price):
+                logger.debug(
+                    "Skipping incomplete kline payload for %s (%s): %s",
+                    symbol,
+                    interval,
+                    data,
+                )
+                return
             
             # Create OHLC data
             ohlc_data = OHLCData(

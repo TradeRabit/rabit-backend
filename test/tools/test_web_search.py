@@ -2,7 +2,7 @@
 Test Web Search Tool (DuckDuckGo)
 """
 
-from agents.tools.web_search import web_search, get_web_search_client
+from agents.tools.market.web_search import web_search, get_web_search_client
 
 
 def test_basic_search():

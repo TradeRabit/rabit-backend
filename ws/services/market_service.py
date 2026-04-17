@@ -125,7 +125,8 @@ class MarketDataService:
     async def initialize_coins(self, symbols: List[str]):
         """
         Initialize coin info for all symbols
-        Only fetch from CoinGecko if not in database
+        Only fetch from CoinGecko if not in database.
+        Retries until all requested symbols are covered.
         
         Args:
             symbols: List of coin symbols to initialize
@@ -148,16 +149,54 @@ class MarketDataService:
             logger.info("All coins already in database")
             return
         
-        logger.info(f"Fetching {len(coins_to_fetch)} coins from CoinGecko: {', '.join(coins_to_fetch)}")
-        
-        # Fetch coins that need updating
-        for symbol in coins_to_fetch:
-            try:
-                await self.get_coin_info(symbol)
-                # Small delay to respect rate limits
-                await asyncio.sleep(0.5)
-            except Exception as e:
-                logger.error(f"Error fetching {symbol}: {e}")
+        remaining_symbols = coins_to_fetch[:]
+        attempt_counts = {symbol: 0 for symbol in remaining_symbols}
+        round_number = 0
+
+        while remaining_symbols:
+            round_number += 1
+            logger.info(
+                f"Fetching {len(remaining_symbols)} coins from CoinGecko "
+                f"(round {round_number}): {', '.join(remaining_symbols)}"
+            )
+
+            failed_symbols = []
+
+            for symbol in remaining_symbols:
+                attempt_counts[symbol] += 1
+
+                try:
+                    coin_info = await self.get_coin_info(symbol)
+
+                    if coin_info:
+                        logger.info(
+                            f"Initialized coin info for {symbol} "
+                            f"on attempt {attempt_counts[symbol]}"
+                        )
+                    else:
+                        failed_symbols.append(symbol)
+                        logger.warning(
+                            f"Coin info for {symbol} unavailable on attempt "
+                            f"{attempt_counts[symbol]}; scheduling retry"
+                        )
+
+                    # Small delay to respect rate limits
+                    await asyncio.sleep(0.5)
+
+                except Exception as e:
+                    failed_symbols.append(symbol)
+                    logger.error(f"Error fetching {symbol} on attempt {attempt_counts[symbol]}: {e}")
+
+            if not failed_symbols:
+                break
+
+            retry_delay = min(60, max(5, 5 * round_number))
+            logger.warning(
+                f"Retrying {len(failed_symbols)} unresolved coins after {retry_delay} seconds: "
+                f"{', '.join(failed_symbols)}"
+            )
+            await asyncio.sleep(retry_delay)
+            remaining_symbols = failed_symbols
         
         logger.info("Coin info initialization complete")
     

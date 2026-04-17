@@ -29,6 +29,18 @@ class CoinGeckoClient:
         self.session: Optional[aiohttp.ClientSession] = None
         self.rate_limit_delay = 2.0  # 2 detik delay antar request untuk free tier
         self.last_request_time = datetime.utcnow()
+
+    @staticmethod
+    def _first_non_empty(items) -> Optional[str]:
+        """Return the first non-empty string from a list-like value."""
+        if not isinstance(items, list):
+            return items if items else None
+
+        for item in items:
+            if item:
+                return item
+
+        return None
         
     async def _ensure_session(self):
         """Ensure aiohttp session exists"""
@@ -95,12 +107,12 @@ class CoinGeckoClient:
             # Parse links
             links_data = data.get("links", {})
             links = CoinLinks(
-                website=links_data.get("homepage", [None])[0],
+                website=self._first_non_empty(links_data.get("homepage", [])),
                 twitter=f"https://twitter.com/{links_data.get('twitter_screen_name')}" if links_data.get('twitter_screen_name') else None,
-                telegram=links_data.get("telegram_channel_identifier"),
-                github=links_data.get("repos_url", {}).get("github", [None])[0],
+                telegram=f"https://t.me/{links_data.get('telegram_channel_identifier')}" if links_data.get("telegram_channel_identifier") else None,
+                github=self._first_non_empty(links_data.get("repos_url", {}).get("github", [])),
                 whitepaper=links_data.get("whitepaper"),
-                explorer=links_data.get("blockchain_site", [None])[0]
+                explorer=self._first_non_empty(links_data.get("blockchain_site", []))
             )
             
             # Parse contract addresses

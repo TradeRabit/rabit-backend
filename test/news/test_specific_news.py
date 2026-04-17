@@ -3,7 +3,7 @@ Test Specific News Search
 Testing if tools can find specific news about N Co Living
 """
 
-from agents.tools.news_tools import (
+from agents.tools.market.news_tools import (
     search_news_by_keywords,
     get_latest_news
 )
@@ -67,7 +67,7 @@ def test_general_search():
     print("Test 3: General Web Search")
     print("="*60)
     
-    from agents.tools.web_search import web_search
+    from agents.tools.market.web_search import web_search
     
     result = web_search("N Co Living Bareskrim narkoba", max_results=5)
     

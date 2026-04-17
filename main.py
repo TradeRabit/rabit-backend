@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config.settings import settings
+from agents.memory import get_mem0_client
 from api.routes import router
 from ws.services import get_market_service
 from ws.handlers import MarketDataHandler
@@ -115,6 +116,10 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Rabit Backend...")
     
     await stop_price_streams()
+    try:
+        await get_mem0_client().close()
+    except Exception as e:
+        logger.error(f"Error closing Mem0 client: {e}")
     
     logger.info("Rabit Backend stopped")
 

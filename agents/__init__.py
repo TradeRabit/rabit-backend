@@ -18,6 +18,13 @@ from agents.compression import ConversationCompressor
 from agents.tools import ToolRegistry, ToolDefinition, ToolParameter, ToolResult, tool_registry
 from agents.tools_registry import register_trading_tools
 from agents.openrouter import OpenRouterModels, ModelInfo, get_openrouter_models, ModelsDatabase, get_models_database
+from agents.uploads import (
+    AgentAttachment,
+    UploadedFileRecord,
+    TemporaryUploadManager,
+    UploadValidationError,
+    get_upload_manager,
+)
 
 # System prompts
 from agents.system_prompts import (
@@ -47,6 +54,7 @@ from agents.context import (
     clear_trading_context,
     get_context_for_agent
 )
+from agents.memory import Mem0Error, Mem0DisabledError, Mem0RequestError, get_mem0_client
 
 __version__ = "1.0.0"
 
@@ -70,6 +78,17 @@ __all__ = [
     "get_openrouter_models",
     "ModelsDatabase",
     "get_models_database",
+
+    # Uploads
+    "AgentAttachment",
+    "UploadedFileRecord",
+    "TemporaryUploadManager",
+    "UploadValidationError",
+    "get_upload_manager",
+    "Mem0Error",
+    "Mem0DisabledError",
+    "Mem0RequestError",
+    "get_mem0_client",
     
     # System Prompts
     "load_prompt",

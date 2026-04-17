@@ -1,52 +1,55 @@
 """Trading agent example"""
 from .base import BaseAgent
-from typing import Optional
+from typing import List, Optional
+
+from agents.conversation_style import CONVERSATION_STYLE_NORMAL
+from agents.trading_style import TRADING_STYLE_BALANCED
+from agents.system_prompts import get_trading_agent_prompt
+from agents.uploads import AgentAttachment
 
 
 class TradingAgent(BaseAgent):
     """Trading assistant agent with tool support"""
     
-    def __init__(self, scope_id: Optional[str] = None):
+    def __init__(self, scope_id: Optional[str] = None, user_id: Optional[str] = None):
         """
         Initialize trading agent
         
         Args:
             scope_id: Optional scope ID for user-specific memory
+            user_id: Optional user ID for long-term Mem0 memory
         """
-        system_prompt = """You are Rabit Agent, a helpful trading assistant for the Rabit platform.
-
-Your name is "Rabit Agent" and you are an AI-powered trading assistant designed to help users with cryptocurrency trading on Solana.
-
-Your capabilities:
-- Get market prices for trading symbols
-- Calculate position sizes based on risk management
-- Provide account information
-- Assist with trading decisions
-- Provide market analysis and insights
-
-When using tools:
-- Always validate parameters before calling
-- If a tool fails, read the error message carefully
-- The error will tell you exactly what went wrong with your parameters
-- Adjust your parameters based on the error details and try again
-
-Be concise, helpful, and professional in your responses."""
-        
         super().__init__(
             name="TradingAgent",
-            system_prompt=system_prompt,
+            system_prompt=get_trading_agent_prompt(),
             scope_id=scope_id,
+            user_id=user_id,
             max_tokens=4000
         )
     
-    async def process_trading_query(self, user_input: str) -> str:
+    async def process_trading_query(
+        self,
+        user_input: str,
+        attachments: Optional[List[AgentAttachment]] = None,
+        conversation_style: str = CONVERSATION_STYLE_NORMAL,
+        trading_style: str = TRADING_STYLE_BALANCED,
+    ) -> str:
         """
         Process trading-related query with tool support
         
         Args:
             user_input: User query
+            attachments: Optional multimodal attachments
+            conversation_style: Requested frontend response style
+            trading_style: Requested frontend trading-analysis style
             
         Returns:
             Agent response
         """
-        return await self.process(user_input, use_tools=True)
+        return await self.process(
+            user_input,
+            use_tools=True,
+            attachments=attachments,
+            conversation_style=conversation_style,
+            trading_style=trading_style,
+        )

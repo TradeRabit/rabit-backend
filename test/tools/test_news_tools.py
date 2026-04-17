@@ -2,7 +2,7 @@
 Test News Tools - Polymorphic news search
 """
 
-from agents.tools.news_tools import (
+from agents.tools.market.news_tools import (
     get_latest_news,
     search_news_by_keywords,
     get_trending_news,

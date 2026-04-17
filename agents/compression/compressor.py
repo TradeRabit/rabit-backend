@@ -1,6 +1,6 @@
 """Auto conversation compression utilities"""
 import tiktoken
-from typing import List, Dict
+from typing import Any, Dict, List
 from anthropic import Anthropic
 from config.settings import settings
 
@@ -33,7 +33,7 @@ class ConversationCompressor:
         except:
             self.encoding = tiktoken.get_encoding("cl100k_base")
     
-    def count_tokens(self, messages: List[Dict[str, str]]) -> int:
+    def count_tokens(self, messages: List[Dict[str, Any]]) -> int:
         """
         Count tokens in messages
         
@@ -45,11 +45,11 @@ class ConversationCompressor:
         """
         total_tokens = 0
         for message in messages:
-            content = message.get("content", "")
+            content = self._stringify_content(message.get("content", ""))
             total_tokens += len(self.encoding.encode(content))
         return total_tokens
-    
-    def needs_compression(self, messages: List[Dict[str, str]]) -> bool:
+
+    def needs_compression(self, messages: List[Dict[str, Any]]) -> bool:
         """
         Check if conversation needs compression
         
@@ -61,7 +61,7 @@ class ConversationCompressor:
         """
         return self.count_tokens(messages) > self.max_tokens
     
-    async def compress(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    async def compress(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Compress conversation history
         
@@ -113,7 +113,7 @@ class ConversationCompressor:
             # If compression fails, return original with truncation
             return self._truncate_messages(messages)
     
-    def _create_summary_prompt(self, messages: List[Dict[str, str]]) -> str:
+    def _create_summary_prompt(self, messages: List[Dict[str, Any]]) -> str:
         """
         Create prompt for summarization
         
@@ -124,7 +124,7 @@ class ConversationCompressor:
             Summary prompt
         """
         conversation = "\n".join([
-            f"{msg['role']}: {msg['content']}" 
+            f"{msg['role']}: {self._stringify_content(msg.get('content', ''))}"
             for msg in messages
         ])
         
@@ -134,7 +134,7 @@ class ConversationCompressor:
 
 Provide a brief summary (max 200 words) that captures the main points and context."""
     
-    def _truncate_messages(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    def _truncate_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Truncate messages if compression fails
         
@@ -156,3 +156,27 @@ Provide a brief summary (max 200 words) that captures the main points and contex
         
         result.extend(messages[-3:])
         return result
+
+    def _stringify_content(self, content: Any) -> str:
+        """Convert multimodal message content into plain text for compression."""
+        if isinstance(content, str):
+            return content
+
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict):
+                    block_type = block.get("type")
+                    if block_type == "text":
+                        parts.append(str(block.get("text", "")))
+                    elif block_type in {"image", "document", "image_url", "file"}:
+                        parts.append(f"[{block_type}]")
+                    elif block_type == "tool_result":
+                        parts.append(str(block.get("content", "")))
+                    else:
+                        parts.append(str(block))
+                else:
+                    parts.append(str(block))
+            return "\n".join(part for part in parts if part)
+
+        return str(content)

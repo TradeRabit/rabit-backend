@@ -1,5 +1,5 @@
 """Tool registry implementation"""
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 from utils.logger import get_logger
 from .definitions import ToolDefinition, ToolResult
 
@@ -22,6 +22,10 @@ class ToolRegistry:
         """
         self._tools[tool.name] = tool
         logger.info(f"Registered tool: {tool.name}")
+
+    def clear(self) -> None:
+        """Clear all registered tools."""
+        self._tools.clear()
     
     def get_tool(self, name: str) -> Optional[ToolDefinition]:
         """
@@ -44,15 +48,20 @@ class ToolRegistry:
         """
         return list(self._tools.values())
     
-    def get_tools_schema(self) -> List[Dict[str, Any]]:
+    def get_tools_schema(self, allowed_names: Optional[Set[str]] = None) -> List[Dict[str, Any]]:
         """
         Get tools schema for Claude API
-        
+
+        Args:
+            allowed_names: Optional set of tool names to expose
+
         Returns:
             List of tool schemas
         """
         schemas = []
         for tool in self._tools.values():
+            if allowed_names is not None and tool.name not in allowed_names:
+                continue
             schema = {
                 "name": tool.name,
                 "description": tool.description,

@@ -40,6 +40,7 @@ class MarketDataHandler:
             
             # Notify listeners
             await self._notify_listeners(f"price:{symbol}", price_update)
+            await self._notify_listeners("price:*", price_update)
         
         except Exception as e:
             logger.error(f"Error handling price update: {str(e)}")
@@ -93,6 +94,7 @@ class MarketDataHandler:
             # Notify listeners
             await self._notify_listeners(f"ohlc:{symbol}:{interval}", ohlc_data)
             await self._notify_listeners(f"ohlc:{symbol}", ohlc_data)  # Also notify generic
+            await self._notify_listeners("ohlc:*", ohlc_data)
         
         except Exception as e:
             logger.error(f"Error handling OHLC update: {str(e)}")
@@ -137,6 +139,7 @@ class MarketDataHandler:
 
             await self._notify_listeners(f"ohlc:{symbol}:{interval}", ohlc_data)
             await self._notify_listeners(f"ohlc:{symbol}", ohlc_data)
+            await self._notify_listeners("ohlc:*", ohlc_data)
         except Exception as e:
             logger.error(f"Error handling OHLC update from exchange: {str(e)}")
     

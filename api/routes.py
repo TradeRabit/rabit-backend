@@ -2,11 +2,20 @@
 API Routes
 REST API endpoints untuk Rabit Mobile
 """
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from typing import Optional, List
 import logging
+import asyncio
+import json
 from datetime import datetime
 
+from agents.core import TradingAgent
+from agents.conversation_style import normalize_conversation_style
+from agents.memory import Mem0DisabledError, Mem0RequestError, get_mem0_client
+from agents.trading_style import normalize_trading_style
+from agents.tools_registry import register_trading_tools
+from agents.uploads import UploadValidationError, get_upload_manager
 from config.settings import settings
 from ws.services import get_market_service
 from ws.handlers import MarketDataHandler
@@ -19,12 +28,67 @@ from api.models import (
     ModelsListResponse,
     ModelInfoResponse,
     ModelStatsResponse,
-    ModelToggleRequest
+    ModelToggleRequest,
+    AgentUploadResponse,
+    AgentUploadDeleteResponse,
+    AgentChatRequest,
+    AgentChatResponse,
+    MemoryCreateRequest,
+    MemoryCreateResponse,
+    MemoryDeleteResponse,
+    MemoryHealthResponse,
+    MemoryListResponse,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
+_agent_tools_registered = False
+
+
+def get_agent(scope_id: Optional[str] = None, user_id: Optional[str] = None) -> TradingAgent:
+    """Create a trading agent with tools registered once."""
+    global _agent_tools_registered
+    if not _agent_tools_registered:
+        register_trading_tools()
+        _agent_tools_registered = True
+    return TradingAgent(scope_id=scope_id, user_id=user_id)
+
+
+def _raise_mem0_http_error(exc: Exception) -> None:
+    """Translate Mem0 client errors into HTTP responses."""
+    if isinstance(exc, Mem0DisabledError):
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if isinstance(exc, Mem0RequestError):
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _format_sse(event_name: str, payload: dict) -> str:
+    """Format an SSE event payload."""
+    return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _serialize_agent_intent(agent) -> Optional[dict]:
+    """Safely serialize the agent's last routed intent for API responses."""
+    intent = getattr(agent, "last_intent", None)
+    if intent is None:
+        return None
+    if hasattr(intent, "model_dump"):
+        return intent.model_dump()
+    if isinstance(intent, dict):
+        return intent
+    return None
+
+
+def _serialize_conversation_style(style: Optional[str]) -> str:
+    """Normalize style values before returning them to clients."""
+    return normalize_conversation_style(style)
+
+
+def _serialize_trading_style(style: Optional[str]) -> str:
+    """Normalize trading style values before returning them to clients."""
+    return normalize_trading_style(style)
 
 
 # ============================================================================
@@ -351,6 +415,337 @@ async def websocket_prices(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket)
+
+
+# ============================================================================
+# Agent Endpoints
+# ============================================================================
+
+@router.get(
+    "/memory/health",
+    response_model=MemoryHealthResponse,
+    summary="Check Mem0 health",
+    tags=["Memory"],
+)
+async def get_memory_health():
+    """Return whether Mem0 is enabled and reachable."""
+    client = get_mem0_client()
+
+    if not client.enabled:
+        return MemoryHealthResponse(
+            enabled=False,
+            healthy=False,
+            base_url=client.base_url,
+            detail="Mem0 is disabled",
+        )
+
+    try:
+        await client.health_check()
+        return MemoryHealthResponse(
+            enabled=True,
+            healthy=True,
+            base_url=client.base_url,
+            detail=None,
+        )
+    except Exception as exc:
+        return MemoryHealthResponse(
+            enabled=True,
+            healthy=False,
+            base_url=client.base_url,
+            detail=str(exc),
+        )
+
+
+@router.get(
+    "/memory/search",
+    response_model=MemoryListResponse,
+    summary="Search user memories",
+    tags=["Memory"],
+)
+async def search_memory(
+    user_id: str = Query(..., description="User ID"),
+    query: str = Query(..., description="Semantic search query"),
+    limit: int = Query(5, description="Maximum number of memories"),
+):
+    """Search Mem0 memories for one user."""
+    try:
+        memories = await get_mem0_client().search_memories(user_id=user_id, query=query, limit=limit)
+        return MemoryListResponse(user_id=user_id, memories=memories, total=len(memories), query=query)
+    except Exception as exc:
+        _raise_mem0_http_error(exc)
+
+
+@router.get(
+    "/memory",
+    response_model=MemoryListResponse,
+    summary="List user memories",
+    tags=["Memory"],
+)
+async def list_memory(user_id: str = Query(..., description="User ID")):
+    """List all stored memories for one user."""
+    try:
+        memories = await get_mem0_client().get_all_memories(user_id=user_id)
+        return MemoryListResponse(user_id=user_id, memories=memories, total=len(memories))
+    except Exception as exc:
+        _raise_mem0_http_error(exc)
+
+
+@router.post(
+    "/memory",
+    response_model=MemoryCreateResponse,
+    summary="Create a user memory",
+    tags=["Memory"],
+)
+async def create_memory(request: MemoryCreateRequest):
+    """Create a Mem0 memory through the backend API."""
+    try:
+        data = await get_mem0_client().add_memory(
+            user_id=request.user_id,
+            text=request.text,
+            metadata=request.metadata,
+        )
+        return MemoryCreateResponse(success=True, user_id=request.user_id, data=data)
+    except Exception as exc:
+        _raise_mem0_http_error(exc)
+
+
+@router.delete(
+    "/memory/{memory_id}",
+    response_model=MemoryDeleteResponse,
+    summary="Delete one user memory",
+    tags=["Memory"],
+)
+async def delete_memory(
+    memory_id: str,
+    user_id: str = Query(..., description="User ID"),
+):
+    """Delete one Mem0 memory by ID."""
+    try:
+        await get_mem0_client().delete_memory(user_id=user_id, memory_id=memory_id)
+        return MemoryDeleteResponse(success=True, user_id=user_id, memory_id=memory_id)
+    except Exception as exc:
+        _raise_mem0_http_error(exc)
+
+
+@router.delete(
+    "/memory",
+    response_model=MemoryDeleteResponse,
+    summary="Delete all user memories",
+    tags=["Memory"],
+)
+async def delete_all_memory(user_id: str = Query(..., description="User ID")):
+    """Delete all Mem0 memories for one user."""
+    try:
+        await get_mem0_client().delete_all_memories(user_id=user_id)
+        return MemoryDeleteResponse(success=True, user_id=user_id, deleted_all=True)
+    except Exception as exc:
+        _raise_mem0_http_error(exc)
+
+
+@router.post(
+    "/agent/uploads",
+    response_model=AgentUploadResponse,
+    summary="Upload temporary agent attachment",
+    tags=["Agent"],
+)
+async def upload_agent_attachment(file: UploadFile = File(...)):
+    """Upload a temporary image or PDF for agent multimodal input."""
+    manager = get_upload_manager()
+
+    try:
+        record = await manager.save_upload(file)
+        return AgentUploadResponse(
+            file_id=record.file_id,
+            filename=record.original_filename,
+            content_type=record.content_type,
+            kind=record.kind,
+            size_bytes=record.size_bytes,
+            expires_at=record.expires_at,
+        )
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error(f"Error uploading agent attachment: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/agent/uploads/{file_id}",
+    response_model=AgentUploadDeleteResponse,
+    summary="Delete temporary agent attachment",
+    tags=["Agent"],
+)
+async def delete_agent_attachment(file_id: str):
+    """Delete a temporary uploaded attachment."""
+    deleted = get_upload_manager().delete(file_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Attachment '{file_id}' not found")
+
+    return AgentUploadDeleteResponse(success=True, file_id=file_id)
+
+
+@router.post(
+    "/agent/chat",
+    response_model=AgentChatResponse,
+    summary="Chat with Rabit agent using temporary multimodal uploads",
+    tags=["Agent"],
+)
+async def chat_with_agent(request: AgentChatRequest):
+    """Chat with the Rabit agent using optional uploaded image/PDF attachments."""
+    upload_manager = get_upload_manager()
+
+    try:
+        attachments = upload_manager.resolve_attachments(request.attachment_ids)
+        agent = get_agent(scope_id=request.scope_id, user_id=request.user_id)
+        response = await agent.process_trading_query(
+            request.message,
+            attachments=attachments,
+            conversation_style=request.conversation_style,
+            trading_style=request.trading_style,
+        )
+
+        return AgentChatResponse(
+            response=response,
+            scope_id=request.scope_id,
+            user_id=request.user_id,
+            conversation_style=_serialize_conversation_style(agent.last_conversation_style),
+            trading_style=_serialize_trading_style(agent.last_trading_style),
+            attachment_ids=request.attachment_ids,
+            intent=_serialize_agent_intent(agent),
+        )
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error(f"Error in agent chat endpoint: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post(
+    "/agent/chat/stream",
+    summary="Stream Rabit agent chat events over SSE",
+    tags=["Agent"],
+)
+async def stream_chat_with_agent(request: AgentChatRequest):
+    """Stream agent output, thinking summary, plan, hint, and error events over SSE."""
+
+    async def event_generator():
+        queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+
+        async def emit(event_name: str, payload: dict):
+            await queue.put(_format_sse(event_name, payload))
+
+        async def run_agent():
+            agent = None
+            try:
+                upload_manager = get_upload_manager()
+                attachments = upload_manager.resolve_attachments(request.attachment_ids)
+                agent = get_agent(scope_id=request.scope_id, user_id=request.user_id)
+
+                response = await agent.process_stream(
+                    request.message,
+                    event_emitter=emit,
+                    use_tools=True,
+                    attachments=attachments,
+                    conversation_style=request.conversation_style,
+                    trading_style=request.trading_style,
+                )
+
+                await emit(
+                    "done",
+                    {
+                        "type": "done",
+                        "status": "completed",
+                        "response": response,
+                        "scope_id": request.scope_id,
+                        "user_id": request.user_id,
+                        "conversation_style": _serialize_conversation_style(
+                            getattr(agent, "last_conversation_style", request.conversation_style)
+                        ),
+                        "trading_style": _serialize_trading_style(
+                            getattr(agent, "last_trading_style", request.trading_style)
+                        ),
+                        "attachment_ids": request.attachment_ids,
+                        "intent": _serialize_agent_intent(agent),
+                    },
+                )
+            except UploadValidationError as exc:
+                await emit(
+                    "error",
+                    {
+                        "type": "error",
+                        "source": "request",
+                        "message": str(exc),
+                        "details": {},
+                    },
+                )
+                await emit(
+                    "done",
+                    {
+                        "type": "done",
+                        "status": "failed",
+                        "conversation_style": _serialize_conversation_style(
+                            getattr(agent, "last_conversation_style", request.conversation_style)
+                        ),
+                        "trading_style": _serialize_trading_style(
+                            getattr(agent, "last_trading_style", request.trading_style)
+                        ),
+                        "intent": _serialize_agent_intent(agent),
+                    },
+                )
+            except Exception as exc:
+                logger.error(f"Error in streaming agent chat endpoint: {exc}")
+                await emit(
+                    "error",
+                    {
+                        "type": "error",
+                        "source": "agent",
+                        "message": str(exc),
+                        "details": {
+                            "error_type": type(exc).__name__,
+                        },
+                    },
+                )
+                await emit(
+                    "done",
+                    {
+                        "type": "done",
+                        "status": "failed",
+                        "conversation_style": _serialize_conversation_style(
+                            getattr(agent, "last_conversation_style", request.conversation_style)
+                        ),
+                        "trading_style": _serialize_trading_style(
+                            getattr(agent, "last_trading_style", request.trading_style)
+                        ),
+                        "intent": _serialize_agent_intent(agent),
+                    },
+                )
+            finally:
+                await queue.put(None)
+
+        task = asyncio.create_task(run_agent())
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+    import contextlib
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ============================================================================

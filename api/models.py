@@ -125,3 +125,96 @@ class ModelToggleRequest(BaseModel):
     """Request to enable/disable model"""
     model_id: str
     enabled: bool
+
+
+class AgentUploadResponse(BaseModel):
+    """Response for agent temporary uploads."""
+
+    file_id: str
+    filename: str
+    content_type: str
+    kind: str
+    size_bytes: int
+    expires_at: datetime
+
+
+class AgentUploadDeleteResponse(BaseModel):
+    """Response for deleting a temporary upload."""
+
+    success: bool
+    file_id: str
+
+
+class AgentChatRequest(BaseModel):
+    """Request body for multimodal agent chat."""
+
+    message: str = Field(..., description="User message for the agent")
+    scope_id: Optional[str] = Field(None, description="Optional memory scope for the chat session")
+    user_id: Optional[str] = Field(None, description="Optional user ID for Mem0 long-term memory")
+    conversation_style: str = Field(
+        default="normal",
+        description="Response style: normal, learning, concise, explanatory, or formal",
+    )
+    trading_style: str = Field(
+        default="balanced",
+        description=(
+            "Trading analysis style: balanced, price_action, trend_following, "
+            "momentum_breakout, mean_reversion, smart_money, risk_first, or systematic"
+        ),
+    )
+    attachment_ids: List[str] = Field(default_factory=list, description="Temporary uploaded file IDs")
+
+
+class AgentChatResponse(BaseModel):
+    """Response body for multimodal agent chat."""
+
+    response: str
+    scope_id: Optional[str] = None
+    user_id: Optional[str] = None
+    conversation_style: str = "normal"
+    trading_style: str = "balanced"
+    attachment_ids: List[str] = Field(default_factory=list)
+    intent: Optional[Dict[str, Any]] = None
+
+
+class MemoryCreateRequest(BaseModel):
+    """Create a user memory."""
+
+    user_id: str = Field(..., description="User ID that owns the memory")
+    text: str = Field(..., description="Long-term memory text to save")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional memory metadata")
+
+
+class MemoryCreateResponse(BaseModel):
+    """Response for creating a user memory."""
+
+    success: bool
+    user_id: str
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryListResponse(BaseModel):
+    """Response for listing or searching user memories."""
+
+    user_id: str
+    memories: List[Dict[str, Any]] = Field(default_factory=list)
+    total: int
+    query: Optional[str] = None
+
+
+class MemoryDeleteResponse(BaseModel):
+    """Response for deleting memory records."""
+
+    success: bool
+    user_id: str
+    memory_id: Optional[str] = None
+    deleted_all: bool = False
+
+
+class MemoryHealthResponse(BaseModel):
+    """Mem0 connectivity status."""
+
+    enabled: bool
+    healthy: bool
+    base_url: str
+    detail: Optional[str] = None

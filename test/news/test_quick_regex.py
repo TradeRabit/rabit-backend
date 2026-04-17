@@ -1,4 +1,4 @@
-from agents.tools.news_tools import search_news_by_keywords
+from agents.tools.market.news_tools import search_news_by_keywords
 
 # Test 1: BTC|ETH|SOL
 print("Test 1: BTC|ETH|SOL")

@@ -4,6 +4,7 @@ Stores OHLC data from multiple exchanges (Binance, Backpack, Drift)
 """
 import json
 import os
+import time
 from typing import Optional, List, Dict
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +43,10 @@ class OHLCDatabase:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.data: Dict[str, Dict[str, Dict[str, List[dict]]]] = {}
         self.max_candles_per_interval = 10000  # Limit storage per interval
+        self.save_interval_seconds = 5.0
+        self.max_pending_changes = 200
+        self._last_save_monotonic = 0.0
+        self._pending_changes = 0
         self.load()
         
     def load(self):
@@ -67,11 +72,22 @@ class OHLCDatabase:
             logger.info("OHLC database file not found, starting fresh")
             self.data = {}
     
-    def save(self):
-        """Save database to file"""
+    def save(self, force: bool = False):
+        """Save database to file with lightweight write throttling."""
+        now = time.monotonic()
+        if not force:
+            self._pending_changes += 1
+            if (
+                self._pending_changes < self.max_pending_changes
+                and now - self._last_save_monotonic < self.save_interval_seconds
+            ):
+                return
+
         try:
             with open(self.db_path, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, indent=2, ensure_ascii=False, default=str)
+            self._last_save_monotonic = now
+            self._pending_changes = 0
             logger.debug("Saved OHLC database")
         except Exception as e:
             logger.error(f"Error saving OHLC database: {e}")
@@ -125,13 +141,13 @@ class OHLCDatabase:
                     merged = merged[-self.max_candles_per_interval:]
                 
                 self.data[symbol][exchange][interval] = merged
-                logger.info(f"Merged {len(new_candles)} candles for {symbol} ({exchange}/{interval}), total: {len(merged)}")
+                logger.debug(f"Merged {len(new_candles)} candles for {symbol} ({exchange}/{interval}), total: {len(merged)}")
             else:
                 # Replace existing data
                 self.data[symbol][exchange][interval] = new_candles
-                logger.info(f"Saved {len(new_candles)} candles for {symbol} ({exchange}/{interval})")
+                logger.debug(f"Saved {len(new_candles)} candles for {symbol} ({exchange}/{interval})")
             
-            self.save()
+            self.save(force=False)
             
         except Exception as e:
             logger.error(f"Error saving candles for {symbol} ({exchange}/{interval}): {e}")
@@ -271,7 +287,7 @@ class OHLCDatabase:
                         if not self.data[symbol]:
                             del self.data[symbol]
                         
-                        self.save()
+                        self.save(force=True)
                         logger.info(f"Deleted candles for {symbol} ({exchange}/{interval})")
         except Exception as e:
             logger.error(f"Error deleting candles: {e}")
@@ -288,13 +304,13 @@ class OHLCDatabase:
                 if not self.data[symbol]:
                     del self.data[symbol]
         
-        self.save()
+        self.save(force=True)
         logger.info(f"Cleared all data for exchange: {exchange}")
     
     def clear_all(self):
         """Clear all OHLC data"""
         self.data = {}
-        self.save()
+        self.save(force=True)
         logger.info("Cleared all OHLC data")
     
     def get_stats(self) -> Dict:
