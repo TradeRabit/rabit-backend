@@ -41,7 +41,7 @@ class Settings:
     BACKPACK_SUBSCRIBE_ASSETS = int(os.getenv("BACKPACK_SUBSCRIBE_ASSETS", "25"))
     
     # Price Source Selection
-    PRICE_SOURCE = os.getenv("PRICE_SOURCE", "backpack")  # "drift" or "backpack"
+    PRICE_SOURCE = os.getenv("PRICE_SOURCE", "backpack")  # "drift", "backpack", or "both"
     
     # Binance Configuration
     BINANCE_API_URL = os.getenv("BINANCE_API_URL", "https://api.binance.com")
@@ -67,6 +67,33 @@ class Settings:
     # SearXNG Configuration (Not used - using DuckDuckGo instead)
     SEARXNG_ENABLED = os.getenv("SEARXNG_ENABLED", "false").lower() == "true"
     SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8888")
+
+    def get_price_sources(self) -> list[str]:
+        """
+        Resolve PRICE_SOURCE into concrete WebSocket sources.
+
+        Supported values:
+        - "backpack"
+        - "drift"
+        - "both" -> backpack + drift
+        """
+        price_source = (self.PRICE_SOURCE or "backpack").strip().lower()
+
+        if price_source == "both":
+            sources = ["backpack", "drift"]
+        elif price_source in {"backpack", "drift"}:
+            sources = [price_source]
+        else:
+            sources = ["backpack"]
+
+        if "backpack" in sources and not self.BACKPACK_ENABLED:
+            sources = [source for source in sources if source != "backpack"]
+
+        return sources
+
+    def uses_price_source(self, source: str) -> bool:
+        """Check if a source is enabled by PRICE_SOURCE."""
+        return source.strip().lower() in self.get_price_sources()
 
 
 settings = Settings()

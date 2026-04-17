@@ -43,6 +43,17 @@ class MarketDataHandler:
         
         except Exception as e:
             logger.error(f"Error handling price update: {str(e)}")
+
+    async def on_price_update_from_exchange(self, exchange: str, price_update: PriceUpdate):
+        """
+        Handle price update with explicit exchange source.
+
+        Args:
+            exchange: Exchange name ('drift', 'backpack', etc.)
+            price_update: Price update data
+        """
+        self.exchange_source = exchange.lower()
+        await self.on_price_update(price_update)
     
     async def on_ohlc_update(self, ohlc_data: OHLCData, interval: str = "1h"):
         """
@@ -85,6 +96,49 @@ class MarketDataHandler:
         
         except Exception as e:
             logger.error(f"Error handling OHLC update: {str(e)}")
+
+    async def on_ohlc_update_from_exchange(
+        self,
+        exchange: str,
+        ohlc_data: OHLCData,
+        interval: str = "1h"
+    ):
+        """
+        Handle OHLC update with explicit exchange source.
+
+        Args:
+            exchange: Exchange name ('drift', 'backpack', etc.)
+            ohlc_data: OHLC data
+            interval: Candle interval
+        """
+        try:
+            symbol = ohlc_data.symbol
+
+            if symbol not in self.ohlc_data:
+                self.ohlc_data[symbol] = {}
+
+            if interval not in self.ohlc_data[symbol]:
+                self.ohlc_data[symbol][interval] = []
+
+            self.ohlc_data[symbol][interval].append(ohlc_data)
+            if len(self.ohlc_data[symbol][interval]) > 1000:
+                self.ohlc_data[symbol][interval].pop(0)
+
+            logger.debug(f"OHLC update: {symbol} ({interval}) from {exchange} = {ohlc_data.close}")
+
+            if self.auto_save_ohlc and self.db:
+                self.db.save_candles(
+                    symbol=symbol,
+                    exchange=exchange.lower(),
+                    interval=interval,
+                    candles=[ohlc_data],
+                    merge=True
+                )
+
+            await self._notify_listeners(f"ohlc:{symbol}:{interval}", ohlc_data)
+            await self._notify_listeners(f"ohlc:{symbol}", ohlc_data)
+        except Exception as e:
+            logger.error(f"Error handling OHLC update from exchange: {str(e)}")
     
     def subscribe(self, event: str, callback: Callable):
         """

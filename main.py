@@ -27,6 +27,57 @@ logger = logging.getLogger(__name__)
 market_handler = MarketDataHandler()
 
 
+async def start_price_streams():
+    """Start configured WebSocket price streams."""
+    active_sources = settings.get_price_sources()
+    logger.info(f"Active price sources: {', '.join(active_sources) if active_sources else 'none'}")
+
+    if "backpack" in active_sources:
+        logger.info("Starting Backpack WebSocket service...")
+        try:
+            from ws.backpack import get_backpack_service
+
+            backpack_service = get_backpack_service()
+            await backpack_service.start(market_handler)
+            logger.info("Backpack WebSocket service started")
+        except Exception as e:
+            logger.error(f"Failed to start Backpack service: {e}")
+
+    if "drift" in active_sources:
+        logger.info("Starting Drift WebSocket service...")
+        try:
+            from ws.drift import get_drift_service
+
+            drift_service = get_drift_service()
+            await drift_service.start(market_handler)
+            logger.info("Drift WebSocket service started")
+        except Exception as e:
+            logger.error(f"Failed to start Drift service: {e}")
+
+
+async def stop_price_streams():
+    """Stop configured WebSocket price streams."""
+    active_sources = settings.get_price_sources()
+
+    if "backpack" in active_sources:
+        try:
+            from ws.backpack import get_backpack_service
+
+            backpack_service = get_backpack_service()
+            await backpack_service.stop()
+        except Exception as e:
+            logger.error(f"Error stopping Backpack service: {e}")
+
+    if "drift" in active_sources:
+        try:
+            from ws.drift import get_drift_service
+
+            drift_service = get_drift_service()
+            await drift_service.stop()
+        except Exception as e:
+            logger.error(f"Error stopping Drift service: {e}")
+
+
 # ============================================================================
 # Lifespan Events
 # ============================================================================
@@ -53,37 +104,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error initializing coins: {e}")
     
-    # Start WebSocket service based on PRICE_SOURCE setting
-    price_source = settings.PRICE_SOURCE.lower()
-    logger.info(f"Price source: {price_source}")
-    
-    if price_source == "backpack" and settings.BACKPACK_ENABLED:
-        logger.info("Starting Backpack WebSocket service...")
-        try:
-            from ws.backpack import get_backpack_service
-            backpack_service = get_backpack_service()
-            await backpack_service.start(market_handler)
-            logger.info("Backpack WebSocket service started")
-        except Exception as e:
-            logger.error(f"Failed to start Backpack service: {e}")
-    
-    elif price_source == "drift":
-        logger.info("Starting Drift WebSocket service...")
-        try:
-            from ws.drift import DriftWSClient
-            drift_client = DriftWSClient()
-            await drift_client.connect()
-            
-            # Subscribe to assets
-            for symbol in settings.DRIFT_ASSETS[:settings.DRIFT_SUBSCRIBE_ASSETS]:
-                await drift_client.subscribe(symbol, market_handler.on_price_update)
-            
-            logger.info("Drift WebSocket service started")
-        except Exception as e:
-            logger.error(f"Failed to start Drift service: {e}")
-    
-    else:
-        logger.warning(f"Unknown price source: {price_source}")
+    logger.info(f"Price source config: {settings.PRICE_SOURCE.lower()}")
+    await start_price_streams()
     
     logger.info("Rabit Backend started successfully!")
     
@@ -92,14 +114,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Rabit Backend...")
     
-    # Stop WebSocket services
-    if price_source == "backpack":
-        try:
-            from ws.backpack import get_backpack_service
-            backpack_service = get_backpack_service()
-            await backpack_service.stop()
-        except Exception as e:
-            logger.error(f"Error stopping Backpack service: {e}")
+    await stop_price_streams()
     
     logger.info("Rabit Backend stopped")
 

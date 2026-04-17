@@ -5,7 +5,9 @@ REST API endpoints untuk Rabit Mobile
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Query
 from typing import Optional, List
 import logging
+from datetime import datetime
 
+from config.settings import settings
 from ws.services import get_market_service
 from ws.handlers import MarketDataHandler
 from ws.binance import BinanceHistoryDownloader
@@ -215,10 +217,10 @@ async def get_ohlc_data(
         
         # Determine source
         if source == "auto":
-            source = settings.PRICE_SOURCE
-        
+            source = "backpack" if settings.uses_price_source("backpack") else "binance"
+
         # Try to get from WebSocket handler first (real-time data)
-        if source == "backpack" and settings.BACKPACK_ENABLED:
+        if source in {"backpack", "both"} and settings.uses_price_source("backpack"):
             from main import market_handler
             ohlc_data = market_handler.get_ohlc(symbol, interval=interval, limit=limit)
             
@@ -380,7 +382,7 @@ async def health_check():
 # OpenRouter Models Endpoints
 # ============================================
 
-@app.get("/api/models", response_model=ModelsListResponse, tags=["Models"])
+@router.get("/models", response_model=ModelsListResponse, tags=["Models"])
 async def list_models(
     require_tools: bool = False,
     require_reasoning: bool = False,
@@ -439,7 +441,7 @@ async def list_models(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/models/stats", response_model=ModelStatsResponse, tags=["Models"])
+@router.get("/models/stats", response_model=ModelStatsResponse, tags=["Models"])
 async def get_models_stats():
     """Get statistics about available models"""
     try:
@@ -459,7 +461,7 @@ async def get_models_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/models/{model_id:path}", response_model=ModelInfoResponse, tags=["Models"])
+@router.get("/models/{model_id:path}", response_model=ModelInfoResponse, tags=["Models"])
 async def get_model_info(model_id: str):
     """Get information about a specific model"""
     try:
@@ -484,7 +486,7 @@ async def get_model_info(model_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/models/toggle", tags=["Models"])
+@router.post("/models/toggle", tags=["Models"])
 async def toggle_model(request: ModelToggleRequest):
     """Enable or disable a model"""
     try:
@@ -520,7 +522,7 @@ async def toggle_model(request: ModelToggleRequest):
 
 
 
-@app.get("/api/models/providers", tags=["Models"])
+@router.get("/models/providers", tags=["Models"])
 async def list_providers():
     """Get list of all providers"""
     try:
@@ -543,7 +545,7 @@ async def list_providers():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/models/grouped", tags=["Models"])
+@router.get("/models/grouped", tags=["Models"])
 async def get_models_grouped(
     enabled_only: bool = True,
     require_tools: bool = False,
@@ -609,7 +611,7 @@ async def get_models_grouped(
 
 
 
-@app.get("/api/models/database/stats", tags=["Models"])
+@router.get("/models/database/stats", tags=["Models"])
 async def get_database_stats():
     """Get database statistics"""
     try:
@@ -625,7 +627,7 @@ async def get_database_stats():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/models/database/refresh", tags=["Models"])
+@router.post("/models/database/refresh", tags=["Models"])
 async def refresh_database():
     """Force refresh database from OpenRouter API"""
     try:
@@ -648,7 +650,7 @@ async def refresh_database():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/api/models/database/clear", tags=["Models"])
+@router.delete("/models/database/clear", tags=["Models"])
 async def clear_database():
     """Clear all models from database (will be refetched on next request)"""
     try:

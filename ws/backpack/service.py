@@ -20,6 +20,16 @@ class BackpackService:
         self.client: Optional[BackpackWSClient] = None
         self.handler: Optional[MarketDataHandler] = None
         self.running = False
+
+    async def _on_price_update(self, price_update):
+        """Forward price updates with Backpack source metadata."""
+        if self.handler:
+            await self.handler.on_price_update_from_exchange("backpack", price_update)
+
+    async def _on_ohlc_update(self, ohlc_data, interval: str = "1h"):
+        """Forward OHLC updates with Backpack source metadata."""
+        if self.handler:
+            await self.handler.on_ohlc_update_from_exchange("backpack", ohlc_data, interval)
     
     async def start(self, handler: MarketDataHandler):
         """
@@ -42,9 +52,6 @@ class BackpackService:
             self.handler = handler
             self.client = BackpackWSClient()
             
-            # Set exchange source for OHLC auto-save
-            handler.set_exchange_source("backpack")
-            
             # Connect to Backpack
             await self.client.connect()
             
@@ -54,14 +61,14 @@ class BackpackService:
                     # Subscribe to price updates
                     await self.client.subscribe(
                         symbol=symbol,
-                        callback=handler.on_price_update,
+                        callback=self._on_price_update,
                         subscribe_ohlc=True
                     )
                     
                     # Subscribe to OHLC updates
                     self.client.subscribe_ohlc(
                         symbol=symbol,
-                        callback=handler.on_ohlc_update
+                        callback=self._on_ohlc_update
                     )
                     
                     # Small delay to avoid rate limits

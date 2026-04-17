@@ -21,6 +21,16 @@ class DriftService:
         self.handler: Optional[MarketDataHandler] = None
         self.running = False
 
+    async def _on_price_update(self, price_update):
+        """Forward price updates with Drift source metadata."""
+        if self.handler:
+            await self.handler.on_price_update_from_exchange("drift", price_update)
+
+    async def _on_ohlc_update(self, ohlc_data, interval: str = "1h"):
+        """Forward OHLC updates with Drift source metadata."""
+        if self.handler:
+            await self.handler.on_ohlc_update_from_exchange("drift", ohlc_data, interval)
+
     async def start(self, handler: MarketDataHandler):
         """
         Start Drift WebSocket service
@@ -38,9 +48,6 @@ class DriftService:
             self.handler = handler
             self.client = DriftWSClient()
             
-            # Set exchange source for OHLC auto-save
-            handler.set_exchange_source("drift")
-
             # Connect to Drift
             await self.client.connect()
 
@@ -50,14 +57,14 @@ class DriftService:
                     # Subscribe to price updates
                     await self.client.subscribe(
                         symbol=symbol,
-                        callback=handler.on_price_update,
+                        callback=self._on_price_update,
                         subscribe_ohlc=True
                     )
 
                     # Subscribe to OHLC updates
                     self.client.subscribe_ohlc(
                         symbol=symbol,
-                        callback=handler.on_ohlc_update
+                        callback=self._on_ohlc_update
                     )
 
                     # Small delay to avoid rate limits
