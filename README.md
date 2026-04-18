@@ -1,459 +1,185 @@
 # Rabit Backend
 
-Backend service untuk Rabit dengan WebSocket (driftpy), Claude Agent SDK, dan REST API.
+Rabit Backend is the backend service for the Rabit trading assistant experience.
 
-## ✨ Features
+It combines:
 
-- ✅ **REST API** - FastAPI dengan auto-generated documentation
-- ✅ **WebSocket** - Real-time price updates
-- ✅ **Auto Conversation Compression** - Otomatis compress conversation ketika mencapai token limit
-- ✅ **Memory Management** - Scoped memory per user dan global memory
-- ✅ **Tool Calling System** - Comprehensive tool registry dengan detailed error handling
-- ✅ **CoinGecko Integration** - Basic coin information dengan database caching
-- 🚧 **Drift WebSocket** - Real-time market data (coming soon)
+- a FastAPI REST and streaming API surface
+- one adaptive trading agent runtime
+- exchange-aware execution flows for Backpack and Drift
+- real-time market-data ingestion
+- long-term memory and request-scoped context
 
-## 📁 Struktur Project
+## What This Backend Does
 
-```
-rabit-backend/
-├── api/                 # REST API endpoints
-│   ├── routes.py       # API routes
-│   ├── models.py       # Response models
-│   └── __init__.py
-├── config/              # Konfigurasi aplikasi
-├── agents/              # Claude Agent implementations
-│   ├── core/           # BaseAgent & TradingAgent
-│   ├── memory/         # Memory management
-│   ├── compression/    # Auto compression
-│   ├── tools/          # Tool registry
-│   └── examples/       # Example tools
-├── ws/                  # WebSocket & Market Data
-│   ├── drift/          # Drift protocol WS
-│   ├── binance/        # Binance OHLC data
-│   ├── coingecko/      # CoinGecko integration
-│   ├── services/       # Market data service
-│   ├── handlers/       # Event handlers
-│   └── models/         # Data models
-├── models/              # Database models
-├── utils/               # Utility functions
-├── docs/                # Documentation
-├── main.py              # FastAPI entry point
-└── requirements.txt     # Dependencies
-```
+The current backend supports:
 
-## 🚀 Quick Start
+- agent chat with multimodal uploads
+- SSE streaming for assistant text and UI events
+- wallet-based authentication
+- Backpack encrypted credential storage and gated execution
+- Drift read-only account access and same-wallet execution preparation
+- real-time and chart-oriented market-data flows
+- OpenRouter model catalog management
 
-### 1. Create Virtual Environment
+## Quick Start
+
+### 1. Create and activate a virtual environment
 
 ```bash
 python -m venv venv
+```
 
-# Windows
+Windows:
+
+```bash
 venv\Scripts\activate
+```
 
-# Linux/Mac
+Linux or macOS:
+
+```bash
 source venv/bin/activate
 ```
 
-### 2. Install Dependencies
+### 2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Setup Environment Variables
+If you want Drift read-only account tools, also install:
+
+```bash
+pip install -r requirements-drift-readonly.txt
+```
+
+### 3. Configure environment variables
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` dan tambahkan `ANTHROPIC_API_KEY` Anda.
+Typical local values to review first:
 
-### 4. Run Application
+- `ANTHROPIC_API_KEY` or OpenRouter configuration
+- `AUTH_JWT_SECRET`
+- `DRIFT_RPC_URL`
+- `BACKPACK_API_URL`
+
+### 4. Start the backend
 
 ```bash
 python main.py
 ```
 
-Server akan berjalan di `http://localhost:8000`
+The default local server is:
 
-## 📡 API Endpoints
+- `http://localhost:8000`
 
-### Base URL
-```
-http://localhost:8000
-```
+## Main Entrypoints
 
-### Interactive Documentation
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+- API health: `http://localhost:8000/api/health`
 
-### Endpoints
+## Documentation
 
-#### 1. Get Assets List
-```bash
-GET /api/assets
-```
+The docs tree has been reorganized to make it easier to read quickly, especially for demos and hackathon judging.
 
-**Parameters:**
-- `category` (optional): Filter by category (e.g., 'DeFi', 'Stablecoin')
-- `limit` (optional): Maximum number of results (default: 50)
+Start here:
 
-**Example:**
-```bash
-curl http://localhost:8000/api/assets
-curl http://localhost:8000/api/assets?category=DeFi
-```
+- [Documentation Portal](./docs/README.md)
+- [Getting Started](./docs/getting-started/index.md)
+- [Features](./docs/features/index.md)
+- [API](./docs/api/index.md)
+- [Agents](./docs/agents/index.md)
+- [WebSocket and Market Data](./docs/websocket/index.md)
+- [Integrations](./docs/integrations/index.md)
+- [Architecture](./docs/architecture/index.md)
+- [Full Documentation Index](./docs/DOCS_INDEX.md)
 
-**Response:**
-```json
-{
-  "assets": [
-    {
-      "symbol": "BTC",
-      "name": "Bitcoin",
-      "price": 65230.12,
-      "change_24h": 2.45,
-      "categories": ["Cryptocurrency", "Layer 1"]
-    }
-  ],
-  "total": 20
-}
-```
+## Recommended Reading Paths
 
-#### 2. Get Asset Detail
-```bash
-GET /api/assets/{symbol}
-```
+### For judges or reviewers
 
-**Example:**
-```bash
-curl http://localhost:8000/api/assets/BTC
-```
+1. [Getting Started](./docs/getting-started/index.md)
+2. [Features](./docs/features/index.md)
+3. [Agents](./docs/agents/index.md)
+4. [API](./docs/api/index.md)
+5. [Architecture](./docs/architecture/index.md)
 
-**Response:**
-```json
-{
-  "symbol": "BTC",
-  "name": "Bitcoin",
-  "price": 65230.12,
-  "change_24h": 2.45,
-  "volume_24h": 28500000000,
-  "high_24h": 66000.00,
-  "low_24h": 64500.00,
-  "market_cap": 1280000000000,
-  "fdv": 1370000000000,
-  "tvl": null,
-  "open_interest": 5000000,
-  "funding_rate": 0.01,
-  "description": "Bitcoin is the first decentralized cryptocurrency...",
-  "categories": ["Cryptocurrency", "Layer 1"],
-  "links": {
-    "website": "https://bitcoin.org",
-    "twitter": "https://twitter.com/bitcoin",
-    "explorer": "https://blockchain.info",
-    "contract_address": null
-  },
-  "last_updated": "2024-01-01T00:00:00Z"
-}
+### For frontend or mobile integration
+
+1. [API](./docs/api/index.md)
+2. [Authentication API](./docs/api/auth/index.md)
+3. [Agent API](./docs/api/agent/index.md)
+4. [Drift Execution API](./docs/api/drift/index.md)
+5. [Exchange Connections API](./docs/api/exchange-connections/index.md)
+
+### For backend contributors
+
+1. [Architecture](./docs/architecture/index.md)
+2. [Agents](./docs/agents/index.md)
+3. [Development](./docs/development/index.md)
+4. [Integrations](./docs/integrations/index.md)
+
+## Repository Structure
+
+```text
+rabit-backend/
+  api/                FastAPI routes and request/response models
+  agents/             agent runtime, routing, tools, auth, and execution helpers
+  config/             application settings
+  docs/               maintained documentation
+  scripts/            smoke tests and helper scripts
+  test/               automated tests
+  ws/                 websocket and market-data services
+  main.py             FastAPI entry point
 ```
 
-#### 3. Get OHLC Data (Chart)
-```bash
-GET /api/assets/{symbol}/ohlc
-```
+## Key API Groups
 
-**Parameters:**
-- `interval`: Candle interval (`1m`, `5m`, `15m`, `1h`, `4h`, `1d`)
-- `limit`: Number of candles (default: 100, max: 1000)
+The main API is mounted under `/api`.
 
-**Example:**
-```bash
-curl "http://localhost:8000/api/assets/BTC/ohlc?interval=1h&limit=100"
-```
+Main endpoint families:
 
-**Response:**
-```json
-{
-  "symbol": "BTC",
-  "interval": "1h",
-  "data": [
-    {
-      "timestamp": 1704067200000,
-      "open": 65000.00,
-      "high": 65500.00,
-      "low": 64800.00,
-      "close": 65230.12,
-      "volume": 1250000000
-    }
-  ]
-}
-```
+- `/api/auth/*`
+- `/api/agent/*`
+- `/api/memory/*`
+- `/api/exchange-connections/*`
+- `/api/drift/*`
+- `/api/assets/*`
+- `/api/models/*`
+- `/api/ws/prices`
 
-#### 4. WebSocket - Real-time Price Updates
-```bash
-WS /api/ws/prices
-```
+For the detailed API docs, use:
 
-**JavaScript Example:**
-```javascript
-const ws = new WebSocket('ws://localhost:8000/api/ws/prices');
+- [REST API Overview](./docs/api/rest-api.md)
+- [Authentication API](./docs/api/auth/index.md)
+- [Agent API](./docs/api/agent/index.md)
 
-ws.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log('Price update:', data);
-  // { symbol: 'BTC', price: 65230.12, change_24h: 2.45, ... }
-};
-```
+## Status Snapshot
 
-#### 5. Health Check
-```bash
-GET /api/health
-```
+### Backpack
 
-**Example:**
-```bash
-curl http://localhost:8000/api/health
-```
+- encrypted per-user exchange connection storage
+- read-only account tools
+- live execution tools with execution gates
 
-**Response:**
-```json
-{
-  "status": "healthy",
-  "version": "1.0.0",
-  "service": "Rabit Backend API"
-}
-```
+### Drift
 
-## 📖 Complete API Documentation
+- wallet-auth-based identity
+- read-only account tools
+- same-wallet execution prepare and submit bridge
+- no backend-held signer by default
 
-Lihat [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md) untuk dokumentasi lengkap dengan:
-- Semua endpoints dan parameters
-- Request/response examples
-- Error handling
-- WebSocket usage
-- Code examples (JavaScript, Python, cURL)
+## Development Notes
 
-## 📚 Documentation
+- Public documentation lives under `docs/`
+- Historical plans, migration notes, and session logs live under `docs/internal/`
+- Root `README.md` is the repo-level entry point, while `docs/README.md` is the documentation portal
 
-**📖 [Complete Documentation Hub →](docs/README.md)**
+## License
 
-Dokumentasi lengkap telah direorganisasi dengan struktur yang lebih rapi:
-
-### Quick Links
-
-#### 🚀 Getting Started
-- **[Quick Start Guide](docs/getting-started/QUICKSTART.md)** - Get up and running in 5 minutes
-- **[Features Overview](docs/getting-started/FEATURES.md)** - Explore what Rabit can do
-
-#### 📡 API & Integration
-- **[API Reference](docs/api/API_REFERENCE.md)** - Complete API documentation
-- **[WebSocket Structure](docs/websocket/WS_STRUCTURE.md)** - Real-time data integration
-
-#### 🤖 AI Agents
-- **[Agent Structure](docs/agents/AGENTS_STRUCTURE.md)** - AI agent system
-- **[Assistant Types](docs/agents/ASSISTANT_TYPES.md)** - Different assistant types
-
-#### 📊 Data Sources
-- **[Backpack Exchange](docs/websocket/BACKPACK_INTEGRATION.md)** - Backpack integration
-- **[CoinGecko Integration](docs/integrations/COINGECKO_INTEGRATION.md)** - Coin information
-- **[Data Sources Overview](docs/websocket/DATA_SOURCES.md)** - All data sources
-
-#### 💻 Development
-- **[Development Guide](docs/development/DEVELOPMENT.md)** - Development workflow
-- **[Implementation Checklist](docs/development/IMPLEMENTATION_CHECKLIST.md)** - Feature tracking
-
-### Documentation Categories
-
-```
-docs/
-├── getting-started/    # Quick start & features
-├── architecture/       # System design
-├── api/               # API reference
-├── agents/            # AI agents
-├── websocket/         # Real-time data
-├── integrations/      # Third-party services
-├── tools/             # Available tools
-└── development/       # Dev guides
-```
-
-**[→ Browse All Documentation](docs/README.md)** | **[→ Complete Index](docs/DOCS_INDEX.md)**
-
-## 🎯 Frontend Integration
-
-### JavaScript/TypeScript
-
-```typescript
-// services/api.ts
-const API_BASE = 'http://localhost:8000/api';
-
-export async function getAssets(category?: string) {
-  const url = category 
-    ? `${API_BASE}/assets?category=${category}`
-    : `${API_BASE}/assets`;
-  
-  const response = await fetch(url);
-  return response.json();
-}
-
-export async function getAssetDetail(symbol: string) {
-  const response = await fetch(`${API_BASE}/assets/${symbol}`);
-  return response.json();
-}
-
-export function connectPriceUpdates(onUpdate: (data: any) => void) {
-  const ws = new WebSocket('ws://localhost:8000/api/ws/prices');
-  
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    onUpdate(data);
-  };
-  
-  return ws;
-}
-```
-
-### React Hook Example
-
-```typescript
-import { useEffect, useState } from 'react';
-
-function usePriceUpdates() {
-  const [prices, setPrices] = useState<Record<string, number>>({});
-  
-  useEffect(() => {
-    const ws = new WebSocket('ws://localhost:8000/api/ws/prices');
-    
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      setPrices(prev => ({
-        ...prev,
-        [data.symbol]: data.price
-      }));
-    };
-    
-    return () => ws.close();
-  }, []);
-  
-  return prices;
-}
-```
-
-## 🐳 Docker Setup
-
-```bash
-# Setup environment
-make env
-
-# Build dan start
-make build
-make up
-
-# View logs
-make logs
-```
-
-## 🛠️ Development
-
-### Run Tests
-
-```bash
-# Test setup
-python test_setup.py
-
-# Test CoinGecko integration
-python test_coingecko.py
-
-# Test Drift WS (mock)
-python test_drift_mock.py
-```
-
-### Run with Auto-reload
-
-```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-## 🔧 Configuration
-
-Edit `.env` file:
-
-```bash
-# Environment
-ENVIRONMENT=development
-
-# API Keys
-ANTHROPIC_API_KEY=your_key_here
-
-# Server
-HOST=0.0.0.0
-PORT=8000
-
-# WebSocket
-WS_HOST=localhost
-WS_PORT=8765
-
-# Drift
-DRIFT_SUBSCRIBE_ASSETS=SOL,BTC,ETH,USDT,BNB
-```
-
-## 📊 Data Sources
-
-### Real-time Data (Drift WS)
-- Price, 24h %, Volume
-- Open Interest, Funding Rate
-- Market Cap, FDV, High/Low
-
-### Static Data (CoinGecko)
-- Description, Links, Categories
-- Cached for 30 days
-
-### Chart Data (Binance)
-- OHLC data for TradingView
-
-## 🚦 Status Codes
-
-- `200` - Success
-- `400` - Bad Request
-- `404` - Not Found
-- `500` - Internal Server Error
-
-## 🔍 Troubleshooting
-
-### Port already in use
-```bash
-# Kill process on port 8000
-# Windows
-netstat -ano | findstr :8000
-taskkill /PID <PID> /F
-
-# Linux/Mac
-lsof -ti:8000 | xargs kill -9
-```
-
-### Module not found
-```bash
-pip install -r requirements.txt
-```
-
-### WebSocket connection failed
-- Check if server is running
-- Verify WebSocket URL
-- Check firewall settings
-
-## 📝 License
-
-MIT License
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
----
-
-**Version**: 1.0.0
-**Last Updated**: 2024-01-01
+MIT

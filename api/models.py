@@ -22,6 +22,34 @@ class AssetListResponse(BaseModel):
     total: int = Field(..., description="Total number of assets")
 
 
+class AssetSearchResponse(BaseModel):
+    """Response for GET /api/assets/search"""
+    query: str = Field(..., description="Search query used to match assets")
+    assets: List[AssetListItem]
+    total: int = Field(..., description="Total number of matched assets")
+
+
+class AssetCategoryItem(BaseModel):
+    """One available asset category and its asset count."""
+
+    name: str = Field(..., description="Normalized category name")
+    asset_count: int = Field(..., description="Number of tracked assets in this category")
+
+
+class AssetCategoryListResponse(BaseModel):
+    """Response for GET /api/assets/categories"""
+
+    categories: List[AssetCategoryItem]
+    total: int = Field(..., description="Total number of available categories")
+
+
+class SupportedTradingAssetsResponse(BaseModel):
+    """Response for GET /api/assets/supported"""
+
+    assets: List[str] = Field(default_factory=list, description="Configured tracked asset symbols")
+    total: int = Field(..., description="Total number of configured tracked assets")
+
+
 class AssetLinks(BaseModel):
     """Asset links"""
     website: Optional[str] = None

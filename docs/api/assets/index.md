@@ -17,6 +17,40 @@ Response model:
 
 - `AssetListResponse`
 
+### `GET /api/assets/search`
+
+Searches tracked assets by symbol, name, or category.
+
+Query params:
+
+- `q`
+- `limit`
+
+Response model:
+
+- `AssetSearchResponse`
+
+### `GET /api/assets/categories`
+
+Lists normalized categories currently represented by tracked assets.
+
+Response model:
+
+- `AssetCategoryListResponse`
+
+Each category item includes:
+
+- `name`
+- `asset_count`
+
+### `GET /api/assets/supported`
+
+Returns the configured tracked asset symbols used by the backend.
+
+Response model:
+
+- `SupportedTradingAssetsResponse`
+
 ### `GET /api/assets/{symbol}`
 
 Returns detailed information for one asset.
@@ -57,6 +91,8 @@ Response model:
 
 ## Notes
 
+- The current asset universe is based on `settings.TRADING_ASSETS`.
+- Search and category results only reflect assets the backend is already configured to track.
 - OHLC can use Backpack or Binance depending on source selection and availability.
 - `source=auto` uses configured backend behavior to pick the best available source.
 

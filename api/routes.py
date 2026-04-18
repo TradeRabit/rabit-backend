@@ -46,9 +46,13 @@ from config.settings import settings
 from ws.services import get_market_service
 from ws.handlers import MarketDataHandler
 from ws.binance import BinanceHistoryDownloader
+from ws.utils.categories import get_category_stats
 from api.models import (
+    AssetCategoryListResponse,
     AssetListResponse,
+    AssetListItem,
     AssetDetailResponse,
+    AssetSearchResponse,
     OHLCResponse,
     ErrorResponse,
     ModelsListResponse,
@@ -75,6 +79,7 @@ from api.models import (
     MemoryDeleteResponse,
     MemoryHealthResponse,
     MemoryListResponse,
+    SupportedTradingAssetsResponse,
     WalletAuthNonceRequest,
     WalletAuthNonceResponse,
     WalletAuthVerifyRequest,
@@ -668,44 +673,74 @@ async def get_assets(
     - List of assets with symbol, name, price, and 24h change
     """
     try:
-        from main import market_handler
-        
-        service = get_market_service()
-        
-        # Get all symbols from TRADING_ASSETS config
-        symbols = settings.TRADING_ASSETS
-        
-        assets = []
-        for symbol in symbols[:limit]:
-            try:
-                # Get coin info
-                coin_info = await service.get_coin_info(symbol)
-                
-                # Get price data
-                price_update = market_handler.get_price(symbol)
-                
-                if coin_info and price_update:
-                    # Filter by category if provided
-                    if category:
-                        if not coin_info.categories or category not in coin_info.categories:
-                            continue
-                    
-                    assets.append({
-                        "symbol": symbol,
-                        "name": coin_info.name,
-                        "price": price_update.price,
-                        "change_24h": price_update.change_24h,
-                        "categories": coin_info.categories
-                    })
-            except Exception as e:
-                logger.error(f"Error fetching data for {symbol}: {e}")
-                continue
+        assets = await _collect_tracked_assets(category=category, limit=limit)
         
         return {"assets": assets, "total": len(assets)}
         
     except Exception as e:
         logger.error(f"Error in get_assets: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/assets/search",
+    response_model=AssetSearchResponse,
+    summary="Search tracked assets",
+    description="Search tracked assets by symbol, name, or category",
+    tags=["Assets"]
+)
+async def search_assets(
+    q: str = Query(..., min_length=1, description="Search query such as BTC, Bitcoin, or DeFi"),
+    limit: Optional[int] = Query(20, description="Maximum number of results to return")
+):
+    """Search the tracked asset universe for frontend pickers and discovery flows."""
+    try:
+        assets = await _collect_tracked_assets(limit=limit, query=q)
+        return AssetSearchResponse(
+            query=q,
+            assets=[AssetListItem(**item) for item in assets],
+            total=len(assets),
+        )
+    except Exception as e:
+        logger.error(f"Error in search_assets: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/assets/categories",
+    response_model=AssetCategoryListResponse,
+    summary="List available asset categories",
+    description="List normalized categories currently represented in tracked assets",
+    tags=["Assets"]
+)
+async def list_asset_categories():
+    """Return available categories for the current tracked asset universe."""
+    try:
+        assets = await _collect_tracked_assets(limit=len(settings.TRADING_ASSETS))
+        stats = get_category_stats(assets)
+        return AssetCategoryListResponse(
+            categories=[
+                {"name": name, "asset_count": count}
+                for name, count in stats.items()
+            ],
+            total=len(stats),
+        )
+    except Exception as e:
+        logger.error(f"Error in list_asset_categories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/assets/supported",
+    response_model=SupportedTradingAssetsResponse,
+    summary="List supported tracked assets",
+    description="Return the configured tracked asset symbols used by the backend",
+    tags=["Assets"]
+)
+async def list_supported_trading_assets():
+    """Return backend-configured tracked asset symbols for frontend initialization."""
+    assets = [str(symbol).upper() for symbol in settings.TRADING_ASSETS]
+    return SupportedTradingAssetsResponse(assets=assets, total=len(assets))
 
 
 @router.get(
@@ -903,6 +938,57 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+async def _collect_tracked_assets(
+    *,
+    category: Optional[str] = None,
+    limit: Optional[int] = 50,
+    query: Optional[str] = None,
+) -> List[dict]:
+    """Build one filtered list from tracked backend assets."""
+    from main import market_handler
+
+    service = get_market_service()
+    symbols = settings.TRADING_ASSETS
+    max_items = len(symbols) if limit is None else max(0, int(limit))
+    normalized_query = str(query or "").strip().lower()
+
+    assets = []
+    for symbol in symbols[:max_items]:
+        try:
+            coin_info = await service.get_coin_info(symbol)
+            price_update = market_handler.get_price(symbol)
+
+            if not coin_info or not price_update:
+                continue
+
+            if category and (not coin_info.categories or category not in coin_info.categories):
+                continue
+
+            asset = {
+                "symbol": symbol,
+                "name": coin_info.name,
+                "price": price_update.price,
+                "change_24h": price_update.change_24h,
+                "categories": coin_info.categories,
+            }
+
+            if normalized_query:
+                haystacks = [
+                    asset["symbol"].lower(),
+                    (asset["name"] or "").lower(),
+                    " ".join(asset.get("categories", [])).lower(),
+                ]
+                if not any(normalized_query in haystack for haystack in haystacks):
+                    continue
+
+            assets.append(asset)
+        except Exception as e:
+            logger.error(f"Error fetching data for {symbol}: {e}")
+            continue
+
+    return assets
 
 
 @router.websocket("/ws/prices")
