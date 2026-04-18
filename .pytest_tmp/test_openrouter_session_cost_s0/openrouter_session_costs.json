@@ -1,0 +1,35 @@
+{
+  "chat-123": {
+    "scope_id": "chat-123",
+    "user_id": "wallet:user-1",
+    "currency": "USD",
+    "total_calls": 2,
+    "total_input_tokens": 12000,
+    "total_output_tokens": 1500,
+    "total_tokens": 13500,
+    "estimated_cost_usd": 0.0585,
+    "model_ids": [
+      "anthropic/claude-3.5-sonnet"
+    ],
+    "phases": {
+      "intent_router": {
+        "phase": "intent_router",
+        "calls": 1,
+        "input_tokens": 2000,
+        "output_tokens": 500,
+        "total_tokens": 2500,
+        "estimated_cost_usd": 0.0135
+      },
+      "response": {
+        "phase": "response",
+        "calls": 1,
+        "input_tokens": 10000,
+        "output_tokens": 1000,
+        "total_tokens": 11000,
+        "estimated_cost_usd": 0.045
+      }
+    },
+    "created_at": "2026-04-18T14:36:08.554656+00:00",
+    "updated_at": "2026-04-18T14:36:08.555657+00:00"
+  }
+}

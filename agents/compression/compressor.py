@@ -8,16 +8,23 @@ from config.settings import settings
 class ConversationCompressor:
     """Compress conversation history automatically"""
     
-    def __init__(self, max_tokens: int = 4000, model: str = "claude-3-5-sonnet-20241022"):
+    def __init__(
+        self,
+        max_tokens: int = 4000,
+        model: str = "claude-3-5-sonnet-20241022",
+        usage_callback=None,
+    ):
         """
         Initialize compressor
         
         Args:
             max_tokens: Maximum tokens before compression
             model: Model name for token counting
+            usage_callback: Optional callback receiving (response, phase) for usage tracking
         """
         self.max_tokens = max_tokens
         self.model = model
+        self.usage_callback = usage_callback
         
         # Configure client based on USE_OPENROUTER setting
         if settings.USE_OPENROUTER:
@@ -92,6 +99,8 @@ class ConversationCompressor:
                 max_tokens=500,
                 messages=[{"role": "user", "content": summary_prompt}]
             )
+            if self.usage_callback:
+                self.usage_callback(response, "compression")
             
             summary = response.content[0].text
             

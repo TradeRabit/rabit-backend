@@ -4,6 +4,30 @@ This group exposes the OpenRouter model catalog and local model-database operati
 
 ## Endpoints
 
+### `GET /api/openrouter/session-costs/{scope_id}`
+
+Returns the accumulated OpenRouter usage summary for one chat/session scope.
+
+Query params:
+
+- `user_id` when bearer auth is not present
+
+Response model:
+
+- `OpenRouterSessionCostResponse`
+
+Main response fields:
+
+- `scope_id`
+- `user_id`
+- `total_calls`
+- `total_input_tokens`
+- `total_output_tokens`
+- `total_tokens`
+- `estimated_cost_usd`
+- `model_ids`
+- `phases`
+
 ### `GET /api/models`
 
 Lists models with optional filtering.

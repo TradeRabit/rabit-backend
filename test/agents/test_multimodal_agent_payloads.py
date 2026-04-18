@@ -17,6 +17,7 @@ class DummyMessagesAPI:
         return SimpleNamespace(
             content=[SimpleNamespace(text="Multimodal response ok")],
             stop_reason="end_turn",
+            usage=SimpleNamespace(input_tokens=800, output_tokens=200),
         )
 
 
@@ -48,6 +49,7 @@ class DummyAsyncMessagesAPI:
                 )
             ],
             stop_reason="end_turn",
+            usage=SimpleNamespace(input_tokens=120, output_tokens=30),
         )
 
 
@@ -64,6 +66,53 @@ class DummyMem0Client:
     async def get_context(self, user_id, query):
         self.calls.append({"user_id": user_id, "query": query})
         return self.context
+
+
+class DummySessionCostService:
+    def __init__(self):
+        self.calls = []
+
+    def record_usage(self, **kwargs):
+        self.calls.append(kwargs)
+        return {
+            "scope_id": kwargs["scope_id"],
+            "user_id": kwargs["user_id"],
+            "currency": "USD",
+            "total_calls": len(self.calls),
+            "total_input_tokens": sum(call["usage"].get("input_tokens", 0) for call in self.calls),
+            "total_output_tokens": sum(call["usage"].get("output_tokens", 0) for call in self.calls),
+            "total_tokens": sum(
+                call["usage"].get("input_tokens", 0) + call["usage"].get("output_tokens", 0)
+                for call in self.calls
+            ),
+            "estimated_cost_usd": 0.00123,
+            "model_ids": [kwargs["model_id"]],
+            "phases": [],
+            "created_at": "2026-04-18T00:00:00+00:00",
+            "updated_at": "2026-04-18T00:00:00+00:00",
+        }
+
+    def get_scope_summary(self, *, scope_id):
+        if not self.calls:
+            return None
+        latest = self.calls[-1]
+        return {
+            "scope_id": scope_id,
+            "user_id": latest["user_id"],
+            "currency": "USD",
+            "total_calls": len(self.calls),
+            "total_input_tokens": sum(call["usage"].get("input_tokens", 0) for call in self.calls),
+            "total_output_tokens": sum(call["usage"].get("output_tokens", 0) for call in self.calls),
+            "total_tokens": sum(
+                call["usage"].get("input_tokens", 0) + call["usage"].get("output_tokens", 0)
+                for call in self.calls
+            ),
+            "estimated_cost_usd": 0.00123,
+            "model_ids": [latest["model_id"]],
+            "phases": [],
+            "created_at": "2026-04-18T00:00:00+00:00",
+            "updated_at": "2026-04-18T00:00:00+00:00",
+        }
 
 
 def make_attachment(tmp_path: Path, filename: str, content_type: str, kind: str, payload: bytes):
@@ -233,3 +282,30 @@ def test_base_agent_injects_mem0_context_into_system_prompt(monkeypatch):
     assert "Drift live trade execution is enabled for this request." in call["system"]
     assert "response_language: english" in call["system"]
     assert "should_clarify: false" in call["system"]
+
+
+def test_base_agent_tracks_openrouter_session_costs(monkeypatch):
+    dummy_costs = DummySessionCostService()
+
+    monkeypatch.setattr("agents.core.base.Anthropic", DummyAnthropic)
+    monkeypatch.setattr("agents.core.base.AsyncAnthropic", DummyAsyncAnthropic)
+    monkeypatch.setattr("agents.core.base.get_mem0_client", lambda: DummyMem0Client())
+    monkeypatch.setattr("agents.core.base.get_openrouter_session_cost_service", lambda: dummy_costs)
+    monkeypatch.setattr("agents.core.base.settings.USE_OPENROUTER", True)
+    monkeypatch.setattr("agents.core.base.settings.OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet")
+
+    agent = BaseAgent(
+        name="cost-agent",
+        system_prompt="You are helpful.",
+        scope_id="chat-cost-1",
+        user_id="wallet:user-1",
+    )
+
+    response = asyncio.run(agent.process("Analyze BTC"))
+
+    assert response == "Multimodal response ok"
+    assert [call["phase"] for call in dummy_costs.calls[:2]] == ["intent_router", "response"]
+    assert dummy_costs.calls[0]["scope_id"] == "chat-cost-1"
+    assert dummy_costs.calls[0]["user_id"] == "wallet:user-1"
+    assert agent.last_session_cost_summary is not None
+    assert agent.last_session_cost_summary["scope_id"] == "chat-cost-1"

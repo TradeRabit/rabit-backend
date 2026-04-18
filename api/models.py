@@ -385,6 +385,34 @@ class AgentChatRequest(BaseModel):
     attachment_ids: List[str] = Field(default_factory=list, description="Temporary uploaded file IDs")
 
 
+class OpenRouterSessionCostPhaseResponse(BaseModel):
+    """One aggregated OpenRouter usage phase inside a chat/session scope."""
+
+    phase: str
+    calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+
+
+class OpenRouterSessionCostResponse(BaseModel):
+    """Accumulated OpenRouter usage and estimated cost for one scope_id session."""
+
+    scope_id: str
+    user_id: Optional[str] = None
+    currency: str = "USD"
+    total_calls: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    model_ids: List[str] = Field(default_factory=list)
+    phases: List[OpenRouterSessionCostPhaseResponse] = Field(default_factory=list)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 class AgentChatResponse(BaseModel):
     """Response body for multimodal agent chat."""
 
@@ -398,6 +426,7 @@ class AgentChatResponse(BaseModel):
     drift_execution: Optional[AgentDriftExecutionContext] = None
     attachment_ids: List[str] = Field(default_factory=list)
     intent: Optional[Dict[str, Any]] = None
+    session_cost: Optional[OpenRouterSessionCostResponse] = None
 
 
 class ExchangeConnectionCreateRequest(BaseModel):
@@ -471,6 +500,36 @@ class ExchangeConnectionDeleteResponse(BaseModel):
     connection_id: str
     user_id: str
     exchange: str
+
+
+class ExecutionAccessExchangeStatus(BaseModel):
+    """Unified frontend-friendly execution access status for one exchange."""
+
+    exchange: str
+    authority_type: str
+    connected: bool = False
+    execution_ready: bool = False
+    backend_enabled: bool = False
+    active_connection_id: Optional[str] = None
+    label: Optional[str] = None
+    mode: Optional[str] = None
+    auth_wallet_address: Optional[str] = None
+    execution_wallet_address: Optional[str] = None
+    trading_enabled: Optional[bool] = None
+    read_only: Optional[bool] = None
+    same_wallet_required: Optional[bool] = None
+    linked_wallet_supported: Optional[bool] = None
+    backend_held_signer_enabled: Optional[bool] = None
+    notes: List[str] = Field(default_factory=list)
+
+
+class ExecutionAccessResponse(BaseModel):
+    """Unified execution access response for Backpack and Drift."""
+
+    user_id: Optional[str] = None
+    authenticated: bool = False
+    backpack: ExecutionAccessExchangeStatus
+    drift: ExecutionAccessExchangeStatus
 
 
 class WalletAuthNonceRequest(BaseModel):

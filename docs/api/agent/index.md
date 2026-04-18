@@ -69,6 +69,12 @@ Main response fields:
 - `drift_execution`
 - `attachment_ids`
 - `intent`
+- `session_cost`
+
+Notes:
+
+- `session_cost` is only populated when OpenRouter is enabled and the request includes a stable `scope_id`.
+- The value is an accumulated summary for the whole chat/session scope, not only the latest assistant turn.
 
 ### `POST /api/agent/chat/stream`
 
@@ -90,6 +96,10 @@ Main event names:
 - `hint`
 - `error`
 - `done`
+
+Notes:
+
+- The final `done` event may include `session_cost` using the same accumulated scope summary returned by normal chat.
 
 ## Auth Notes
 

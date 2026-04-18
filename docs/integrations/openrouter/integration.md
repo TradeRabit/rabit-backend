@@ -22,6 +22,7 @@ ANTHROPIC_API_KEY=your_anthropic_api_key_here
 USE_OPENROUTER=true
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 OPENROUTER_MODEL=anthropic/claude-3.5-sonnet
+OPENROUTER_SESSION_COST_DB_PATH=data/openrouter_session_costs.json
 ```
 
 ### Available Models
@@ -86,6 +87,27 @@ response = await agent.process_trading_query("What's the price of SOL?")
 ```
 
 **No code changes needed!** The agent automatically uses OpenRouter when `USE_OPENROUTER=true`.
+
+## Session Cost Tracking
+
+When OpenRouter is enabled, the backend can accumulate estimated usage cost per chat/session scope.
+
+How it works:
+
+1. the frontend sends a stable `scope_id` with chat requests
+2. the agent records usage from router calls, main responses, tool follow-ups, streaming rounds, and compression
+3. the backend stores the accumulated summary in `OPENROUTER_SESSION_COST_DB_PATH`
+4. the latest accumulated summary is returned in:
+   - `POST /api/agent/chat` as `session_cost`
+   - the final `done` SSE event for `POST /api/agent/chat/stream`
+   - `GET /api/openrouter/session-costs/{scope_id}`
+
+Important notes:
+
+- tracking is keyed by `scope_id`, not `user_id`
+- if no `scope_id` is provided, session accumulation is skipped
+- values are estimated using the locally stored OpenRouter model pricing data
+- this summary is designed to feed downstream billing or contract-signing flows
 
 ## 💰 Cost Comparison
 

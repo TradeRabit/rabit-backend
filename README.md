@@ -21,6 +21,7 @@ The current backend supports:
 - Drift read-only account access and same-wallet execution preparation
 - real-time and chart-oriented market-data flows
 - OpenRouter model catalog management
+- OpenRouter session-cost accumulation per chat scope
 
 ## Quick Start
 

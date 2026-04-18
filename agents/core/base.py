@@ -16,6 +16,7 @@ from agents.conversation_style import (
     get_conversation_style_guidance,
     normalize_conversation_style,
 )
+from agents.openrouter import get_openrouter_session_cost_service
 from agents.intent_router import AgentIntentContext, build_intent_prompt, parse_intent_response
 from agents.drift_execution import (
     get_drift_execution_guidance,
@@ -94,7 +95,12 @@ class BaseAgent:
             logger.info(f"Initialized agent with Anthropic: {name} (model: {self.model})")
 
         self.memory = ConversationMemory()
-        self.compressor = ConversationCompressor(max_tokens=max_tokens, model=self.model)
+        self.session_costs = get_openrouter_session_cost_service()
+        self.compressor = ConversationCompressor(
+            max_tokens=max_tokens,
+            model=self.model,
+            usage_callback=self._record_openrouter_usage,
+        )
         self.mem0 = get_mem0_client()
         self.last_intent = AgentIntentContext.fallback("No request processed yet.")
         self.last_conversation_style = CONVERSATION_STYLE_NORMAL
@@ -102,6 +108,7 @@ class BaseAgent:
         self.last_market_context = normalize_market_context(None)
         self.last_backpack_execution = normalize_backpack_execution(None)
         self.last_drift_execution = normalize_drift_execution(None)
+        self.last_session_cost_summary: Optional[Dict[str, Any]] = None
 
         logger.info(f"Agent scope: {scope_id or 'global'}")
 
@@ -210,8 +217,10 @@ class BaseAgent:
                     system=effective_system_prompt,
                     messages=messages,
                 )
+                self._record_openrouter_usage(response, "response")
                 response_text = self._extract_response_text(response)
 
+            self.last_session_cost_summary = self._get_session_cost_summary()
             self.add_message("user", user_summary)
             self.add_message("assistant", response_text)
             return response_text
@@ -300,6 +309,7 @@ class BaseAgent:
                     event_emitter,
                 )
 
+            self.last_session_cost_summary = self._get_session_cost_summary()
             self.add_message("user", user_summary)
             self.add_message("assistant", response_text)
             return response_text
@@ -342,6 +352,7 @@ class BaseAgent:
                 messages=messages,
                 tools=tools_schema,
             )
+            self._record_openrouter_usage(response, "response")
 
             if response.stop_reason == "tool_use":
                 tool_results = []
@@ -379,6 +390,7 @@ class BaseAgent:
                     messages=messages,
                     tools=tools_schema,
                 )
+                self._record_openrouter_usage(final_response, "tool_followup")
                 return self._extract_response_text(final_response)
 
             return self._extract_response_text(response)
@@ -500,6 +512,7 @@ class BaseAgent:
                     )
 
             final_message = await stream.get_final_message()
+            self._record_openrouter_usage(final_message, "stream_round")
 
         return final_message, "".join(text_parts).strip()
 
@@ -668,6 +681,7 @@ class BaseAgent:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0,
             )
+            self._record_openrouter_usage(response, "intent_router")
         except Exception as exc:
             logger.warning(f"Intent routing failed, using fallback: {exc}")
             return AgentIntentContext.fallback(f"Router request failed: {exc}")
@@ -689,6 +703,68 @@ class BaseAgent:
             if text:
                 parts.append(text)
         return "\n".join(parts).strip()
+
+    def _record_openrouter_usage(self, response: Any, phase: str) -> Optional[Dict[str, Any]]:
+        """Record one OpenRouter usage event for the current scope when available."""
+        if not settings.USE_OPENROUTER or not self.scope_id:
+            return None
+
+        usage = self._extract_usage_payload(response)
+        if not usage:
+            return None
+
+        try:
+            summary = self.session_costs.record_usage(
+                scope_id=self.scope_id,
+                user_id=self.user_id,
+                model_id=self.model,
+                usage=usage,
+                phase=phase,
+            )
+            self.last_session_cost_summary = summary
+            return summary
+        except Exception as exc:
+            logger.warning(f"Failed to record OpenRouter session cost usage: {exc}")
+            return None
+
+    def _get_session_cost_summary(self) -> Optional[Dict[str, Any]]:
+        """Return the latest accumulated session cost summary for this scope."""
+        if not self.scope_id:
+            return None
+        try:
+            return self.session_costs.get_scope_summary(scope_id=self.scope_id)
+        except Exception as exc:
+            logger.warning(f"Failed to load OpenRouter session cost summary: {exc}")
+            return None
+
+    def _extract_usage_payload(self, response: Any) -> Optional[Dict[str, Any]]:
+        """Extract usage metrics from Anthropic/OpenRouter response objects."""
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return None
+
+        if isinstance(usage, dict):
+            payload = dict(usage)
+        elif hasattr(usage, "model_dump"):
+            payload = usage.model_dump()
+        else:
+            payload = {}
+            for field in (
+                "input_tokens",
+                "output_tokens",
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+            ):
+                value = getattr(usage, field, None)
+                if value is not None:
+                    payload[field] = value
+
+        if not payload:
+            return None
+
+        if not any(int(payload.get(key) or 0) for key in ("input_tokens", "output_tokens")):
+            return None
+        return payload
 
     def _format_tool_error(self, result: ToolResult) -> str:
         """

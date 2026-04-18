@@ -17,6 +17,10 @@ class Settings:
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
     OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet")
     OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api")
+    OPENROUTER_SESSION_COST_DB_PATH = os.getenv(
+        "OPENROUTER_SESSION_COST_DB_PATH",
+        "data/openrouter_session_costs.json",
+    )
     
     # Drift Protocol
     DRIFT_RPC_URL = os.getenv("DRIFT_RPC_URL", "https://api.mainnet-beta.solana.com")

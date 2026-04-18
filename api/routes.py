@@ -39,6 +39,7 @@ from agents.exchange_connections import (
 )
 from agents.market_context import normalize_market_context
 from agents.memory import Mem0DisabledError, Mem0RequestError, get_mem0_client
+from agents.openrouter import get_openrouter_session_cost_service
 from agents.trading_style import normalize_trading_style
 from agents.tools_registry import register_trading_tools
 from agents.uploads import UploadValidationError, get_upload_manager
@@ -72,6 +73,8 @@ from api.models import (
     DriftExecutionSubmitRequest,
     DriftExecutionSubmitResponse,
     DriftExecutionWalletResponse,
+    ExecutionAccessExchangeStatus,
+    ExecutionAccessResponse,
     ExchangeConnectionCreateRequest,
     ExchangeConnectionDeleteResponse,
     ExchangeConnectionListResponse,
@@ -82,6 +85,7 @@ from api.models import (
     MemoryDeleteResponse,
     MemoryHealthResponse,
     MemoryListResponse,
+    OpenRouterSessionCostResponse,
     SupportedTradingAssetsResponse,
     TrendingAssetItem,
     TrendingAssetsResponse,
@@ -217,6 +221,11 @@ def _serialize_backpack_execution(config: Optional[dict]) -> dict:
 def _serialize_drift_execution(config: Optional[dict]) -> dict:
     """Normalize Drift execution values before returning them to clients."""
     return normalize_drift_execution(config)
+
+
+def _serialize_session_cost(summary: Optional[dict]) -> Optional[dict]:
+    """Return session-cost payloads unchanged when present."""
+    return summary or None
 
 
 def _raise_drift_execution_http_error(exc: Exception) -> None:
@@ -365,6 +374,135 @@ async def get_drift_execution_wallet(authorization: Optional[str] = Header(defau
     return DriftExecutionWalletResponse(
         **build_drift_execution_wallet_status(auth_user.get("user_id"))
     )
+
+
+@router.get(
+    "/execution-access",
+    response_model=ExecutionAccessResponse,
+    tags=["Exchange Connections"],
+    summary="Return unified execution access status",
+)
+async def get_execution_access_status(
+    user_id: Optional[str] = Query(None, description="Optional explicit user ID when no bearer token is available"),
+    authorization: Optional[str] = Header(default=None),
+):
+    """Return a unified frontend-friendly execution access status for Backpack and Drift."""
+    auth_user = _get_authenticated_user(authorization)
+    resolved_user_id = _resolve_request_user_id(
+        provided_user_id=user_id,
+        auth_user=auth_user,
+    )
+    if not resolved_user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated user or explicit user_id is required for execution access status.",
+        )
+
+    service = get_exchange_connection_service()
+    backpack_connections = service.list_connections(user_id=resolved_user_id, exchange="backpack")
+    active_backpack = next(
+        (item for item in backpack_connections if item.get("is_active")),
+        None,
+    )
+
+    backpack_status = ExecutionAccessExchangeStatus(
+        exchange="backpack",
+        authority_type="api_credential",
+        connected=active_backpack is not None,
+        execution_ready=bool(
+            settings.BACKPACK_EXECUTION_ENABLED
+            and active_backpack
+            and active_backpack.get("trading_enabled")
+            and not active_backpack.get("read_only", True)
+        ),
+        backend_enabled=settings.BACKPACK_EXECUTION_ENABLED,
+        active_connection_id=active_backpack.get("id") if active_backpack else None,
+        label=active_backpack.get("label") if active_backpack else None,
+        trading_enabled=bool(active_backpack.get("trading_enabled")) if active_backpack else None,
+        read_only=bool(active_backpack.get("read_only")) if active_backpack else None,
+        notes=(
+            [
+                "Backpack execution uses encrypted exchange API credentials.",
+                "Execution is ready only when an active connection exists, trading is enabled, the connection is not read-only, and backend execution is enabled.",
+            ]
+            if active_backpack
+            else [
+                "No active Backpack connection is configured for this user.",
+            ]
+        ),
+    )
+
+    drift_wallet_status = build_drift_execution_wallet_status(
+        auth_user.get("user_id") if auth_user else None
+    )
+    drift_status = ExecutionAccessExchangeStatus(
+        exchange="drift",
+        authority_type="wallet_session",
+        connected=bool(drift_wallet_status.get("verified")),
+        execution_ready=bool(
+            settings.DRIFT_EXECUTION_ENABLED
+            and drift_wallet_status.get("verified")
+            and drift_wallet_status.get("mode") == "same_wallet"
+        ),
+        backend_enabled=settings.DRIFT_EXECUTION_ENABLED,
+        mode=drift_wallet_status.get("mode"),
+        auth_wallet_address=drift_wallet_status.get("auth_wallet_address"),
+        execution_wallet_address=drift_wallet_status.get("execution_wallet_address"),
+        same_wallet_required=drift_wallet_status.get("same_wallet_required"),
+        linked_wallet_supported=drift_wallet_status.get("linked_wallet_supported"),
+        backend_held_signer_enabled=drift_wallet_status.get("backend_held_signer_enabled"),
+        notes=list(drift_wallet_status.get("notes", [])),
+    )
+
+    return ExecutionAccessResponse(
+        user_id=resolved_user_id,
+        authenticated=auth_user is not None,
+        backpack=backpack_status,
+        drift=drift_status,
+    )
+
+
+@router.get(
+    "/openrouter/session-costs/{scope_id}",
+    response_model=OpenRouterSessionCostResponse,
+    tags=["Models"],
+    summary="Return accumulated OpenRouter session cost for one scope",
+)
+async def get_openrouter_session_cost(
+    scope_id: str,
+    user_id: Optional[str] = Query(
+        None,
+        description="Optional explicit user ID when no bearer token is available",
+    ),
+    authorization: Optional[str] = Header(default=None),
+):
+    """Return one scope_id's accumulated OpenRouter usage and estimated cost."""
+    auth_user = _get_authenticated_user(authorization)
+    resolved_user_id = _resolve_request_user_id(
+        provided_user_id=user_id,
+        auth_user=auth_user,
+    )
+    if not resolved_user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated user or explicit user_id is required for session cost access.",
+        )
+
+    summary = get_openrouter_session_cost_service().get_scope_summary(scope_id=scope_id)
+    if not summary:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No OpenRouter session cost summary found for scope_id '{scope_id}'.",
+        )
+
+    owner_user_id = summary.get("user_id")
+    if owner_user_id and owner_user_id != resolved_user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Requested scope_id does not belong to the authenticated user.",
+        )
+
+    return OpenRouterSessionCostResponse(**summary)
 
 
 @router.post(
@@ -1513,6 +1651,9 @@ async def chat_with_agent(
             ),
             attachment_ids=request.attachment_ids,
             intent=_serialize_agent_intent(agent),
+            session_cost=_serialize_session_cost(
+                getattr(agent, "last_session_cost_summary", None)
+            ),
         )
     except UploadValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1600,6 +1741,9 @@ async def stream_chat_with_agent(
                         ),
                         "attachment_ids": request.attachment_ids,
                         "intent": _serialize_agent_intent(agent),
+                        "session_cost": _serialize_session_cost(
+                            getattr(agent, "last_session_cost_summary", None)
+                        ),
                     },
                 )
             except UploadValidationError as exc:
@@ -1645,6 +1789,9 @@ async def stream_chat_with_agent(
                             )
                         ),
                         "intent": _serialize_agent_intent(agent),
+                        "session_cost": _serialize_session_cost(
+                            getattr(agent, "last_session_cost_summary", None)
+                        ),
                     },
                 )
             except Exception as exc:
@@ -1693,6 +1840,9 @@ async def stream_chat_with_agent(
                             )
                         ),
                         "intent": _serialize_agent_intent(agent),
+                        "session_cost": _serialize_session_cost(
+                            getattr(agent, "last_session_cost_summary", None)
+                        ),
                     },
                 )
             finally:

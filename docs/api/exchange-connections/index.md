@@ -6,6 +6,26 @@ At the moment, the implemented connection family is Backpack.
 
 ## Endpoints
 
+### `GET /api/execution-access`
+
+Returns one frontend-friendly execution-access payload for both Backpack and Drift.
+
+Purpose:
+
+- let the frontend render one `execution access` surface
+- hide the implementation difference between Backpack API credentials and Drift wallet/session authority
+- expose whether each exchange is connected and whether live execution is currently ready
+
+Behavior:
+
+- requires either wallet-auth bearer token or an explicit `user_id`
+- `backpack` is derived from the active stored Backpack connection
+- `drift` is derived from the authenticated wallet execution status
+
+Response model:
+
+- `ExecutionAccessResponse`
+
 ### `POST /api/exchange-connections/backpack`
 
 Creates a stored Backpack connection.
