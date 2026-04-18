@@ -43,11 +43,45 @@ class AssetCategoryListResponse(BaseModel):
     total: int = Field(..., description="Total number of available categories")
 
 
+class AssetCategoryAssetsResponse(BaseModel):
+    """Response for GET /api/assets/categories/{category}"""
+
+    category: str = Field(..., description="Normalized category name")
+    assets: List[AssetListItem]
+    total: int = Field(..., description="Total number of assets in the category")
+
+
 class SupportedTradingAssetsResponse(BaseModel):
     """Response for GET /api/assets/supported"""
 
     assets: List[str] = Field(default_factory=list, description="Configured tracked asset symbols")
     total: int = Field(..., description="Total number of configured tracked assets")
+
+
+class RelatedAssetsResponse(BaseModel):
+    """Response for GET /api/assets/{symbol}/related"""
+
+    symbol: str = Field(..., description="Requested asset symbol")
+    primary_category: Optional[str] = Field(default=None, description="Primary category used for fallback matching")
+    assets: List[AssetListItem]
+    total: int = Field(..., description="Total number of related assets returned")
+
+
+class TrendingAssetItem(AssetListItem):
+    """One ranked trending asset item."""
+
+    rank: int = Field(..., description="Rank position in the trending list")
+    score: float = Field(..., description="Composite lightweight ranking score")
+    volume_24h: Optional[float] = Field(default=None, description="24h volume used in ranking")
+    reasons: List[str] = Field(default_factory=list, description="Human-readable ranking hints")
+
+
+class TrendingAssetsResponse(BaseModel):
+    """Response for GET /api/assets/trending"""
+
+    assets: List[TrendingAssetItem]
+    total: int = Field(..., description="Total number of trending assets returned")
+    ranking_method: str = Field(..., description="Short description of the lightweight ranking approach")
 
 
 class AssetLinks(BaseModel):
@@ -85,6 +119,26 @@ class AssetDetailResponse(BaseModel):
     links: AssetLinks
     
     # Metadata
+    last_updated: str
+
+
+class AssetSummaryResponse(BaseModel):
+    """Response for GET /api/assets/{symbol}/summary"""
+
+    symbol: str
+    name: str
+    price: float
+    change_24h: Optional[float] = None
+    volume_24h: Optional[float] = None
+    market_cap: Optional[float] = None
+    fdv: Optional[float] = None
+    open_interest: Optional[float] = None
+    funding_rate: Optional[float] = None
+    primary_category: Optional[str] = None
+    categories: List[str] = Field(default_factory=list)
+    description: Optional[str] = None
+    links: AssetLinks
+    related_assets: List[AssetListItem] = Field(default_factory=list)
     last_updated: str
 
 

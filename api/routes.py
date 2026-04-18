@@ -46,12 +46,15 @@ from config.settings import settings
 from ws.services import get_market_service
 from ws.handlers import MarketDataHandler
 from ws.binance import BinanceHistoryDownloader
-from ws.utils.categories import get_category_stats
+from ws.utils.categories import get_category_stats, get_primary_category, normalize_category
 from api.models import (
+    AssetCategoryAssetsResponse,
     AssetCategoryListResponse,
     AssetListResponse,
     AssetListItem,
     AssetDetailResponse,
+    AssetSummaryResponse,
+    RelatedAssetsResponse,
     AssetSearchResponse,
     OHLCResponse,
     ErrorResponse,
@@ -80,6 +83,8 @@ from api.models import (
     MemoryHealthResponse,
     MemoryListResponse,
     SupportedTradingAssetsResponse,
+    TrendingAssetItem,
+    TrendingAssetsResponse,
     WalletAuthNonceRequest,
     WalletAuthNonceResponse,
     WalletAuthVerifyRequest,
@@ -731,6 +736,31 @@ async def list_asset_categories():
 
 
 @router.get(
+    "/assets/categories/{category}",
+    response_model=AssetCategoryAssetsResponse,
+    summary="List assets for one category",
+    description="Return tracked assets belonging to one normalized category",
+    tags=["Assets"]
+)
+async def list_assets_by_category(
+    category: str,
+    limit: Optional[int] = Query(50, description="Maximum number of results to return"),
+):
+    """Return assets belonging to one normalized category."""
+    try:
+        normalized_category = normalize_category(category)
+        assets = await _collect_tracked_assets(category=normalized_category, limit=limit)
+        return AssetCategoryAssetsResponse(
+            category=normalized_category,
+            assets=[AssetListItem(**item) for item in assets],
+            total=len(assets),
+        )
+    except Exception as e:
+        logger.error(f"Error in list_assets_by_category: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
     "/assets/supported",
     response_model=SupportedTradingAssetsResponse,
     summary="List supported tracked assets",
@@ -741,6 +771,111 @@ async def list_supported_trading_assets():
     """Return backend-configured tracked asset symbols for frontend initialization."""
     assets = [str(symbol).upper() for symbol in settings.TRADING_ASSETS]
     return SupportedTradingAssetsResponse(assets=assets, total=len(assets))
+
+
+@router.get(
+    "/assets/trending",
+    response_model=TrendingAssetsResponse,
+    summary="List lightweight trending tracked assets",
+    description="Return a lightweight trending ranking built from tracked assets, volume, and 24h move",
+    tags=["Assets"]
+)
+async def list_trending_assets(
+    limit: Optional[int] = Query(10, description="Maximum number of trending assets to return"),
+):
+    """Return a frontend-friendly trending list from the current tracked asset universe."""
+    try:
+        assets = await _collect_trending_assets(limit=limit)
+        return TrendingAssetsResponse(
+            assets=[TrendingAssetItem(**item) for item in assets],
+            total=len(assets),
+            ranking_method="tracked-asset score based on 24h volume and absolute 24h move",
+        )
+    except Exception as e:
+        logger.error(f"Error in list_trending_assets: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/assets/{symbol}/summary",
+    response_model=AssetSummaryResponse,
+    summary="Get asset summary",
+    description="Return a one-shot asset summary for frontend detail headers and overview cards",
+    tags=["Assets"]
+)
+async def get_asset_summary(
+    symbol: str,
+    related_limit: Optional[int] = Query(3, description="Maximum number of related assets to include"),
+):
+    """Return a summary payload that combines key asset fields and a small related list."""
+    try:
+        from main import market_handler
+
+        service = get_market_service()
+        symbol = symbol.upper()
+
+        coin_info = await service.get_coin_info(symbol)
+        if not coin_info:
+            raise HTTPException(status_code=404, detail=f"Asset '{symbol}' not found")
+
+        price_update = market_handler.get_price(symbol)
+        if not price_update:
+            raise HTTPException(status_code=404, detail=f"Price data for '{symbol}' not available")
+
+        contract_address = None
+        if coin_info.contract_address:
+            contract_address = list(coin_info.contract_address.values())[0]
+
+        assets = await _collect_tracked_assets(limit=len(settings.TRADING_ASSETS))
+        current_asset = next((item for item in assets if item["symbol"] == symbol), None)
+        current_categories = set(current_asset.get("categories", [])) if current_asset else set(coin_info.categories or [])
+        primary_category = get_primary_category(list(current_categories)) if current_categories else None
+
+        related = []
+        for asset in assets:
+            if asset["symbol"] == symbol:
+                continue
+            other_categories = set(asset.get("categories", []))
+            overlap = len(current_categories.intersection(other_categories))
+            primary_match = bool(primary_category and primary_category in other_categories)
+            if overlap == 0 and not primary_match:
+                continue
+            related.append((overlap, 1 if primary_match else 0, asset))
+
+        related.sort(key=lambda item: (-item[0], -item[1], item[2]["symbol"]))
+        limited_related = [
+            AssetListItem(**item[2]) for item in related[: max(0, int(related_limit or 0))]
+        ]
+
+        return AssetSummaryResponse(
+            symbol=symbol,
+            name=coin_info.name,
+            price=price_update.price,
+            change_24h=price_update.change_24h,
+            volume_24h=price_update.volume_24h,
+            market_cap=price_update.market_cap,
+            fdv=price_update.fdv,
+            open_interest=price_update.open_interest,
+            funding_rate=price_update.funding_rate,
+            primary_category=primary_category,
+            categories=coin_info.categories,
+            description=coin_info.description,
+            links={
+                "website": coin_info.links.website if coin_info.links else None,
+                "twitter": coin_info.links.twitter if coin_info.links else None,
+                "telegram": coin_info.links.telegram if coin_info.links else None,
+                "github": coin_info.links.github if coin_info.links else None,
+                "explorer": coin_info.links.explorer if coin_info.links else None,
+                "contract_address": contract_address,
+            },
+            related_assets=limited_related,
+            last_updated=price_update.timestamp.isoformat(),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_asset_summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get(
@@ -817,6 +952,56 @@ async def get_asset_detail(symbol: str):
         raise
     except Exception as e:
         logger.error(f"Error in get_asset_detail: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/assets/{symbol}/related",
+    response_model=RelatedAssetsResponse,
+    summary="Get related tracked assets",
+    description="Return tracked assets related by shared categories",
+    tags=["Assets"]
+)
+async def get_related_assets(
+    symbol: str,
+    limit: Optional[int] = Query(5, description="Maximum number of related assets to return"),
+):
+    """Return related tracked assets using shared category overlap."""
+    try:
+        symbol = symbol.upper()
+        assets = await _collect_tracked_assets(limit=len(settings.TRADING_ASSETS))
+        current_asset = next((item for item in assets if item["symbol"] == symbol), None)
+        if not current_asset:
+            raise HTTPException(status_code=404, detail=f"Asset '{symbol}' not found")
+
+        current_categories = set(current_asset.get("categories", []))
+        primary_category = get_primary_category(list(current_categories)) if current_categories else None
+
+        related = []
+        for asset in assets:
+            if asset["symbol"] == symbol:
+                continue
+            other_categories = set(asset.get("categories", []))
+            overlap = sorted(current_categories.intersection(other_categories))
+            score = len(overlap)
+            primary_match = bool(primary_category and primary_category in other_categories)
+            if score == 0 and not primary_match:
+                continue
+            related.append((score, 1 if primary_match else 0, asset))
+
+        related.sort(key=lambda item: (-item[0], -item[1], item[2]["symbol"]))
+        limited = [AssetListItem(**item[2]) for item in related[: max(0, int(limit or 0))]]
+
+        return RelatedAssetsResponse(
+            symbol=symbol,
+            primary_category=primary_category,
+            assets=limited,
+            total=len(limited),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_related_assets: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -989,6 +1174,59 @@ async def _collect_tracked_assets(
             continue
 
     return assets
+
+
+async def _collect_trending_assets(limit: Optional[int] = 10) -> List[dict]:
+    """Build a lightweight trending ranking from tracked assets."""
+    from main import market_handler
+
+    service = get_market_service()
+    ranked = []
+    max_items = max(0, int(limit or 0))
+
+    for symbol in settings.TRADING_ASSETS:
+        try:
+            coin_info = await service.get_coin_info(symbol)
+            price_update = market_handler.get_price(symbol)
+            if not coin_info or not price_update:
+                continue
+
+            volume_24h = float(price_update.volume_24h or 0.0)
+            abs_change = abs(float(price_update.change_24h or 0.0))
+            score = (volume_24h / 1_000_000.0) + (abs_change * 10.0)
+
+            reasons = []
+            if volume_24h > 0:
+                reasons.append("active 24h volume")
+            if abs_change >= 5:
+                reasons.append("strong 24h move")
+            elif abs_change >= 2:
+                reasons.append("meaningful 24h move")
+            if "DeFi" in (coin_info.categories or []):
+                reasons.append("DeFi exposure")
+            if "Layer 1" in (coin_info.categories or []):
+                reasons.append("Layer 1 exposure")
+
+            ranked.append(
+                {
+                    "symbol": str(symbol).upper(),
+                    "name": coin_info.name,
+                    "price": price_update.price,
+                    "change_24h": price_update.change_24h,
+                    "categories": coin_info.categories,
+                    "volume_24h": price_update.volume_24h,
+                    "score": round(score, 4),
+                    "reasons": reasons[:3],
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error building trending data for {symbol}: {e}")
+            continue
+
+    ranked.sort(key=lambda item: (-item["score"], item["symbol"]))
+    for idx, item in enumerate(ranked[:max_items], start=1):
+        item["rank"] = idx
+    return ranked[:max_items]
 
 
 @router.websocket("/ws/prices")

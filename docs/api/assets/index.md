@@ -43,6 +43,22 @@ Each category item includes:
 - `name`
 - `asset_count`
 
+### `GET /api/assets/categories/{category}`
+
+Returns tracked assets belonging to one normalized category.
+
+Path params:
+
+- `category`
+
+Query params:
+
+- `limit`
+
+Response model:
+
+- `AssetCategoryAssetsResponse`
+
 ### `GET /api/assets/supported`
 
 Returns the configured tracked asset symbols used by the backend.
@@ -50,6 +66,25 @@ Returns the configured tracked asset symbols used by the backend.
 Response model:
 
 - `SupportedTradingAssetsResponse`
+
+### `GET /api/assets/trending`
+
+Returns a lightweight trending ranking built from tracked assets.
+
+Query params:
+
+- `limit`
+
+Response model:
+
+- `TrendingAssetsResponse`
+
+Each item includes:
+
+- `rank`
+- `score`
+- `volume_24h`
+- `reasons`
 
 ### `GET /api/assets/{symbol}`
 
@@ -70,6 +105,45 @@ Main fields include:
 - volume and daily range when available
 - market cap and other enrichment when available
 - description, categories, and links
+
+### `GET /api/assets/{symbol}/summary`
+
+Returns a one-shot summary payload for frontend detail headers and overview sections.
+
+Path params:
+
+- `symbol`
+
+Query params:
+
+- `related_limit`
+
+Response model:
+
+- `AssetSummaryResponse`
+
+Summary payload includes:
+
+- key market fields
+- `primary_category`
+- short metadata and links
+- a small `related_assets` list
+
+### `GET /api/assets/{symbol}/related`
+
+Returns related tracked assets using shared categories.
+
+Path params:
+
+- `symbol`
+
+Query params:
+
+- `limit`
+
+Response model:
+
+- `RelatedAssetsResponse`
 
 ### `GET /api/assets/{symbol}/ohlc`
 

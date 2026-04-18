@@ -129,8 +129,41 @@ def test_asset_search_categories_and_supported_routes(monkeypatch):
     assert "DeFi" in category_names
     assert "Layer 1" in category_names
 
+    category_assets_response = client.get("/api/assets/categories/defi")
+    assert category_assets_response.status_code == 200
+    category_assets_payload = category_assets_response.json()
+    assert category_assets_payload["category"] == "DeFi"
+    assert category_assets_payload["total"] == 2
+    assert [item["symbol"] for item in category_assets_payload["assets"]] == ["ETH", "UNI"]
+
     supported_response = client.get("/api/assets/supported")
     assert supported_response.status_code == 200
     supported_payload = supported_response.json()
     assert supported_payload["assets"] == ["BTC", "ETH", "UNI"]
     assert supported_payload["total"] == 3
+
+    trending_response = client.get("/api/assets/trending", params={"limit": 2})
+    assert trending_response.status_code == 200
+    trending_payload = trending_response.json()
+    assert trending_payload["total"] == 2
+    assert "ranking_method" in trending_payload
+    assert trending_payload["assets"][0]["rank"] == 1
+    assert trending_payload["assets"][0]["symbol"] == "BTC"
+    assert "active 24h volume" in trending_payload["assets"][0]["reasons"]
+
+    summary_response = client.get("/api/assets/ETH/summary", params={"related_limit": 2})
+    assert summary_response.status_code == 200
+    summary_payload = summary_response.json()
+    assert summary_payload["symbol"] == "ETH"
+    assert summary_payload["primary_category"] == "Layer 1"
+    assert summary_payload["links"]["contract_address"] == "0xeth"
+    assert len(summary_payload["related_assets"]) == 2
+    assert [item["symbol"] for item in summary_payload["related_assets"]] == ["BTC", "UNI"]
+
+    related_response = client.get("/api/assets/ETH/related", params={"limit": 5})
+    assert related_response.status_code == 200
+    related_payload = related_response.json()
+    assert related_payload["symbol"] == "ETH"
+    assert related_payload["primary_category"] == "Layer 1"
+    assert related_payload["total"] == 2
+    assert [item["symbol"] for item in related_payload["assets"]] == ["BTC", "UNI"]
