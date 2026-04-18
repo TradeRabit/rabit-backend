@@ -172,6 +172,12 @@ Current groups are:
 
 This means the router is not only descriptive. It also shapes the tool surface sent to the model.
 
+Examples of newer intent-to-tool coverage:
+
+- `position_sizing` can now use `calculate_position_size`
+- `market_scan` can now use `scan_markets`
+- `journal_debrief` can now persist structured reflections through `create_trade_debrief`
+
 ## Clarification Behavior
 
 The router also decides whether a request should be clarified.

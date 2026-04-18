@@ -30,6 +30,7 @@ from agents.tools.memory.mem0_tools import (
     get_user_memory,
 )
 from agents.tools.backpack_execution import register_backpack_execution_tools
+from agents.tools.decision_support import register_decision_support_tools
 from agents.tools.drift_execution import register_drift_readonly_tools
 from agents.tools.ui.ui_stream_tools import show_hint, show_plan, show_thinking_summary
 
@@ -371,6 +372,10 @@ def register_trading_tools():
     # ===== DRIFT PUBLIC READ-ONLY TOOLS =====
 
     register_drift_readonly_tools()
+
+    # ===== DECISION SUPPORT TOOLS =====
+
+    register_decision_support_tools()
 
     # ===== LONG-TERM MEMORY TOOLS =====
 

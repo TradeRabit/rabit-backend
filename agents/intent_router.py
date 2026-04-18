@@ -103,7 +103,7 @@ USER_GOAL_TYPE_VALUES = {
 }
 
 TOOL_GROUPS: Dict[str, Set[str]] = {
-    "market": {"get_price"},
+    "market": {"get_price", "scan_markets"},
     "research": {
         "web_search",
         "get_latest_news",
@@ -149,8 +149,10 @@ TOOL_GROUPS: Dict[str, Set[str]] = {
         "get_user_memory",
         "delete_user_memory",
         "clear_user_memories",
+        "create_trade_debrief",
     },
     "portfolio": {
+        "calculate_position_size",
         "backpack_get_balances",
         "backpack_get_collateral",
         "backpack_get_open_orders",

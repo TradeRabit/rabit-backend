@@ -97,6 +97,10 @@ class Settings:
         "EXCHANGE_CREDENTIALS_MASTER_KEY",
         "",
     ).strip()
+    TRADE_DEBRIEF_DB_PATH = os.getenv(
+        "TRADE_DEBRIEF_DB_PATH",
+        "data/trade_debriefs.json",
+    )
 
     # Mobile wallet auth
     AUTH_JWT_SECRET = os.getenv("AUTH_JWT_SECRET", "").strip()

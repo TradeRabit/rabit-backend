@@ -14,6 +14,7 @@ This section summarizes the tool surface exposed to the agent runtime.
 ### Memory
 
 - user memory create, lookup, and delete tools
+- structured trade debrief persistence tool
 
 ### UI Streaming
 
@@ -26,6 +27,12 @@ This section summarizes the tool surface exposed to the agent runtime.
 - Backpack account and execution tools
 - Drift read-only account tools
 - Drift same-wallet execution preparation bridge
+
+### Decision Support
+
+- `calculate_position_size` for deterministic risk-based sizing
+- `scan_markets` for lightweight ranked screening across tracked assets
+- `create_trade_debrief` for structured post-trade journaling
 
 ## Related Documentation
 

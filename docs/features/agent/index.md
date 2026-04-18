@@ -11,6 +11,7 @@ The Rabit backend uses a single adaptive `TradingAgent` entry point.
 - frontend-selected conversation style
 - frontend-selected trading style
 - frontend-selected market context
+- decision-support tools for market scan, position sizing, and structured trade debriefs
 
 ## UI-Oriented Agent Events
 
