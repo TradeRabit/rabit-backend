@@ -176,6 +176,8 @@ TOOL_GROUPS: Dict[str, Set[str]] = {
         "backpack_place_order",
         "backpack_cancel_order",
         "drift_get_open_orders",
+        "drift_place_order",
+        "drift_cancel_order",
     },
     "ui": {
         "show_thinking_summary",

@@ -158,14 +158,17 @@ class DriftExecutionTxBuilder:
             bit_flags=bit_flags,
         )
 
-    async def build_place_perp_order_payload(
+    async def _build_single_ix_payload(
         self,
         *,
         wallet_address: str,
         sub_account_id: int,
-        order_intent: Dict[str, Any],
+        ix_builder,
+        classification: str,
+        action: str,
+        market_type: str,
     ) -> Dict[str, Any]:
-        """Build an unsigned same-wallet Drift perp-order transaction payload."""
+        """Build a generic unsigned single-instruction Drift transaction payload."""
         sdk = self._load_sdk()
         wallet_pubkey = sdk["Pubkey"].from_string(wallet_address)
 
@@ -203,8 +206,7 @@ class DriftExecutionTxBuilder:
             if hasattr(drift_client, "subscribe"):
                 await drift_client.subscribe()
 
-            order_params = self._build_order_params(order_intent, sdk)
-            ix = drift_client.get_place_perp_order_ix(order_params, sub_account_id=sub_account_id)
+            ix = ix_builder(drift_client)
             blockhash_response = await connection.get_latest_blockhash()
             blockhash_value = blockhash_response.value
             blockhash = blockhash_value.blockhash
@@ -230,8 +232,9 @@ class DriftExecutionTxBuilder:
             state_public_key = str(drift_client.get_state_public_key())
 
             return {
-                "classification": "same_wallet_mobile_signing_payload",
-                "market_type": "perp",
+                "classification": classification,
+                "action": action,
+                "market_type": market_type,
                 "sub_account_id": sub_account_id,
                 "wallet_address": wallet_address,
                 "authority": wallet_address,
@@ -256,6 +259,67 @@ class DriftExecutionTxBuilder:
                     await drift_client.unsubscribe()
             with suppress(Exception):
                 await connection.close()
+
+    async def build_place_perp_order_payload(
+        self,
+        *,
+        wallet_address: str,
+        sub_account_id: int,
+        order_intent: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Build an unsigned same-wallet Drift perp-order transaction payload."""
+        sdk = self._load_sdk()
+        order_params = self._build_order_params(order_intent, sdk)
+        return await self._build_single_ix_payload(
+            wallet_address=wallet_address,
+            sub_account_id=sub_account_id,
+            ix_builder=lambda drift_client: drift_client.get_place_perp_order_ix(
+                order_params, sub_account_id=sub_account_id
+            ),
+            classification="same_wallet_mobile_signing_payload",
+            action="place_perp_order",
+            market_type="perp",
+        )
+
+    async def build_cancel_order_payload(
+        self,
+        *,
+        wallet_address: str,
+        sub_account_id: int,
+        order_id: Optional[str] = None,
+        user_order_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Build an unsigned same-wallet Drift cancel-order transaction payload."""
+        parsed_order_id = None
+        if order_id is not None:
+            parsed_order_id = self._parse_required_int(order_id, "order_id")
+        if parsed_order_id is None and user_order_id is None:
+            raise DriftTxBuilderValidationError(
+                "Provide order_id or user_order_id to build a Drift cancel-order payload."
+            )
+        if user_order_id is not None:
+            parsed_user_order_id = self._parse_required_int(user_order_id, "user_order_id")
+            return await self._build_single_ix_payload(
+                wallet_address=wallet_address,
+                sub_account_id=sub_account_id,
+                ix_builder=lambda drift_client: drift_client.get_cancel_order_by_user_id_ix(
+                    parsed_user_order_id, sub_account_id=sub_account_id
+                ),
+                classification="same_wallet_mobile_signing_payload",
+                action="cancel_order",
+                market_type="perp",
+            )
+
+        return await self._build_single_ix_payload(
+            wallet_address=wallet_address,
+            sub_account_id=sub_account_id,
+            ix_builder=lambda drift_client: drift_client.get_cancel_order_ix(
+                order_id=parsed_order_id, sub_account_id=sub_account_id
+            ),
+            classification="same_wallet_mobile_signing_payload",
+            action="cancel_order",
+            market_type="perp",
+        )
 
 
 _drift_execution_tx_builder: Optional[DriftExecutionTxBuilder] = None
