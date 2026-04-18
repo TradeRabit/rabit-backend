@@ -12,8 +12,8 @@ uvicorn[standard]>=0.24.0
 python-multipart>=0.0.9
 
 # Exchange SDKs
-# Solana & Drift (install separately if needed)
-# driftpy>=0.1.0
+# Solana & Drift read-only account tools use an optional dependency set.
+# See requirements-drift-readonly.txt for the verified package group.
 
 # Backpack Exchange SDK
 bpx-py>=1.1.4

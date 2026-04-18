@@ -2,7 +2,7 @@
 API Routes
 REST API endpoints untuk Rabit Mobile
 """
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, File, Header, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from typing import Optional, List
 import logging
@@ -11,7 +11,33 @@ import json
 from datetime import datetime
 
 from agents.core import TradingAgent
+from agents.auth import (
+    JWTAuthError,
+    WalletAuthError,
+    create_wallet_auth_nonce,
+    verify_access_token,
+    verify_wallet_auth,
+)
+from agents.backpack_execution import normalize_backpack_execution
 from agents.conversation_style import normalize_conversation_style
+from agents.drift_execution import (
+    DriftExecutionRequestNotFoundError,
+    DriftExecutionRequestOwnershipError,
+    DriftTxBuilderValidationError,
+    DriftTxBuilderWalletError,
+    build_drift_execution_wallet_status,
+    get_drift_execution_request_service,
+    get_drift_execution_tx_builder,
+    normalize_drift_execution,
+)
+from agents.auth.base58 import b58decode
+from agents.exchange_connections import (
+    ExchangeConnectionNotFoundError,
+    ExchangeConnectionOwnershipError,
+    ExchangeCredentialCryptoError,
+    get_exchange_connection_service,
+)
+from agents.market_context import normalize_market_context
 from agents.memory import Mem0DisabledError, Mem0RequestError, get_mem0_client
 from agents.trading_style import normalize_trading_style
 from agents.tools_registry import register_trading_tools
@@ -33,11 +59,26 @@ from api.models import (
     AgentUploadDeleteResponse,
     AgentChatRequest,
     AgentChatResponse,
+    AuthMeResponse,
+    DriftExecutionPrepareRequest,
+    DriftExecutionRecordResponse,
+    DriftExecutionSubmitRequest,
+    DriftExecutionSubmitResponse,
+    DriftExecutionWalletResponse,
+    ExchangeConnectionCreateRequest,
+    ExchangeConnectionDeleteResponse,
+    ExchangeConnectionListResponse,
+    ExchangeConnectionResponse,
+    ExchangeConnectionUpdateRequest,
     MemoryCreateRequest,
     MemoryCreateResponse,
     MemoryDeleteResponse,
     MemoryHealthResponse,
     MemoryListResponse,
+    WalletAuthNonceRequest,
+    WalletAuthNonceResponse,
+    WalletAuthVerifyRequest,
+    WalletAuthVerifyResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,6 +103,68 @@ def _raise_mem0_http_error(exc: Exception) -> None:
     if isinstance(exc, Mem0RequestError):
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _raise_exchange_connection_http_error(exc: Exception) -> None:
+    """Translate exchange connection service errors into HTTP responses."""
+    if isinstance(exc, ExchangeCredentialCryptoError):
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if isinstance(exc, ExchangeConnectionNotFoundError):
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if isinstance(exc, ExchangeConnectionOwnershipError):
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if isinstance(exc, ValueError):
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    """Extract bearer token from Authorization header."""
+    if not authorization:
+        return None
+    prefix = "bearer "
+    if authorization.lower().startswith(prefix):
+        return authorization[len(prefix):].strip()
+    return None
+
+
+def _get_authenticated_user(authorization: Optional[str]) -> Optional[dict]:
+    """Return verified auth claims from Authorization header, if present."""
+    token = _extract_bearer_token(authorization)
+    if not token:
+        return None
+    try:
+        return verify_access_token(token)
+    except JWTAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+def _resolve_request_user_id(
+    *,
+    provided_user_id: Optional[str],
+    auth_user: Optional[dict],
+) -> Optional[str]:
+    """Prefer authenticated user identity and reject mismatches."""
+    if auth_user is None:
+        return provided_user_id
+
+    auth_user_id = auth_user.get("user_id")
+    if provided_user_id and provided_user_id != auth_user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Provided user_id does not match the authenticated wallet user.",
+        )
+    return auth_user_id
+
+
+def _require_resolved_user_id(user_id: Optional[str]) -> str:
+    """Require a resolved user identity for protected resource ownership."""
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated user or explicit user_id is required for this endpoint.",
+        )
+    return user_id
 
 
 def _format_sse(event_name: str, payload: dict) -> str:
@@ -89,6 +192,454 @@ def _serialize_conversation_style(style: Optional[str]) -> str:
 def _serialize_trading_style(style: Optional[str]) -> str:
     """Normalize trading style values before returning them to clients."""
     return normalize_trading_style(style)
+
+
+def _serialize_market_context(context: Optional[dict]) -> dict:
+    """Normalize market context values before returning them to clients."""
+    return normalize_market_context(context)
+
+
+def _serialize_backpack_execution(config: Optional[dict]) -> dict:
+    """Normalize Backpack execution values before returning them to clients."""
+    return normalize_backpack_execution(config)
+
+
+def _serialize_drift_execution(config: Optional[dict]) -> dict:
+    """Normalize Drift execution values before returning them to clients."""
+    return normalize_drift_execution(config)
+
+
+def _raise_drift_execution_http_error(exc: Exception) -> None:
+    """Translate Drift execution request ownership/storage errors into HTTP responses."""
+    if isinstance(exc, DriftExecutionRequestNotFoundError):
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if isinstance(exc, DriftExecutionRequestOwnershipError):
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if isinstance(exc, (DriftTxBuilderValidationError, DriftTxBuilderWalletError)):
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if isinstance(exc, ValueError):
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _require_wallet_authenticated_user(auth_user: Optional[dict]) -> tuple[str, str]:
+    """Require wallet-authenticated identity and return user_id plus wallet address."""
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail="Missing bearer token.")
+    user_id = auth_user.get("user_id")
+    wallet_address = auth_user.get("wallet_address")
+    if not user_id or not wallet_address:
+        raise HTTPException(
+            status_code=401,
+            detail="Wallet-authenticated user is required for Drift execution endpoints.",
+        )
+    return user_id, wallet_address
+
+
+def _require_drift_execution_api_enabled() -> None:
+    """Require backend Drift execution API gate."""
+    if not settings.DRIFT_EXECUTION_ENABLED:
+        raise HTTPException(
+            status_code=403,
+            detail="Drift live execution is globally disabled by backend configuration.",
+        )
+
+
+def _require_same_wallet_execution_status(user_id: str) -> dict:
+    """Require the current user to resolve to same-wallet Drift execution mode."""
+    status = build_drift_execution_wallet_status(user_id)
+    if not status.get("verified"):
+        raise HTTPException(
+            status_code=403,
+            detail="Drift execution wallet is not verified for this user.",
+        )
+    if status.get("mode") != "same_wallet":
+        raise HTTPException(
+            status_code=403,
+            detail="Only same-wallet Drift execution is supported in v1.",
+        )
+    return status
+
+
+def _decode_signed_transaction(payload: str, encoding: str) -> bytes:
+    """Decode a signed transaction using base64 or base58 input."""
+    normalized = str(encoding or "base64").strip().lower()
+    if normalized == "base64":
+        import base64
+
+        try:
+            return base64.b64decode(payload)
+        except Exception as exc:
+            raise ValueError("Invalid base64 signed_transaction payload.") from exc
+    if normalized == "base58":
+        try:
+            return b58decode(payload)
+        except Exception as exc:
+            raise ValueError("Invalid base58 signed_transaction payload.") from exc
+    raise ValueError("transaction_encoding must be 'base64' or 'base58'.")
+
+
+# ============================================================================
+# Wallet Auth Endpoints
+# ============================================================================
+
+@router.post(
+    "/auth/wallet/nonce",
+    response_model=WalletAuthNonceResponse,
+    tags=["Auth"],
+    summary="Create wallet sign-in challenge",
+)
+async def create_wallet_nonce(request: WalletAuthNonceRequest):
+    """Create a one-time wallet sign-in challenge for mobile clients."""
+    try:
+        payload = create_wallet_auth_nonce(wallet_address=request.wallet_address)
+        return WalletAuthNonceResponse(**payload)
+    except Exception as exc:
+        logger.error(f"Error creating wallet auth nonce: {exc}")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/auth/wallet/verify",
+    response_model=WalletAuthVerifyResponse,
+    tags=["Auth"],
+    summary="Verify wallet signature and issue JWT",
+)
+async def verify_wallet_signin(request: WalletAuthVerifyRequest):
+    """Verify a signed wallet challenge and issue a bearer token."""
+    try:
+        payload = verify_wallet_auth(
+            wallet_address=request.wallet_address,
+            nonce=request.nonce,
+            signature=request.signature,
+            signature_encoding=request.signature_encoding,
+            message=request.message,
+        )
+        return WalletAuthVerifyResponse(**payload)
+    except WalletAuthError as exc:
+        logger.error(f"Wallet auth verification failed: {exc}")
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error(f"Unexpected wallet auth verification error: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get(
+    "/auth/me",
+    response_model=AuthMeResponse,
+    tags=["Auth"],
+    summary="Return authenticated wallet identity",
+)
+async def get_authenticated_me(authorization: Optional[str] = Header(default=None)):
+    """Return the current authenticated wallet identity."""
+    auth_user = _get_authenticated_user(authorization)
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail="Missing bearer token.")
+    return AuthMeResponse(
+        user_id=auth_user["user_id"],
+        wallet_address=auth_user["wallet_address"],
+    )
+
+
+@router.get(
+    "/drift/execution-wallet",
+    response_model=DriftExecutionWalletResponse,
+    tags=["Drift"],
+    summary="Return resolved Drift execution wallet status",
+)
+async def get_drift_execution_wallet(authorization: Optional[str] = Header(default=None)):
+    """Return the current Drift auth-wallet/execution-wallet status."""
+    auth_user = _get_authenticated_user(authorization)
+    if auth_user is None:
+        raise HTTPException(status_code=401, detail="Missing bearer token.")
+    return DriftExecutionWalletResponse(
+        **build_drift_execution_wallet_status(auth_user.get("user_id"))
+    )
+
+
+@router.post(
+    "/drift/execution/prepare",
+    response_model=DriftExecutionRecordResponse,
+    tags=["Drift"],
+    summary="Prepare same-wallet Drift execution intent",
+)
+async def prepare_drift_execution(
+    request: DriftExecutionPrepareRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Prepare a same-wallet Drift execution request for client-side signing."""
+    _require_drift_execution_api_enabled()
+    auth_user = _get_authenticated_user(authorization)
+    user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    execution_wallet = _require_same_wallet_execution_status(user_id)
+
+    market_type = str(request.market_type or "perp").strip().lower()
+    if market_type != "perp":
+        raise HTTPException(
+            status_code=400,
+            detail="Drift v1 execution prepare currently supports market_type='perp' only.",
+        )
+
+    order_intent = {
+        "market_type": market_type,
+        "market_index": request.market_index,
+        "symbol": request.symbol,
+        "side": str(request.side).strip().lower(),
+        "order_type": str(request.order_type).strip().lower(),
+        "base_asset_amount": request.base_asset_amount,
+        "price": request.price,
+        "reduce_only": request.reduce_only,
+        "post_only": request.post_only,
+        "immediate_or_cancel": request.immediate_or_cancel,
+        "client_order_id": request.client_order_id,
+    }
+    try:
+        prepared_transaction = await get_drift_execution_tx_builder().build_place_perp_order_payload(
+            wallet_address=wallet_address,
+            sub_account_id=request.sub_account_id,
+            order_intent=order_intent,
+        )
+        record = get_drift_execution_request_service().create_prepared_request(
+            user_id=user_id,
+            auth_wallet_address=wallet_address,
+            execution_wallet_status=execution_wallet,
+            sub_account_id=request.sub_account_id,
+            order_intent=order_intent,
+            prepared_transaction=prepared_transaction,
+        )
+        return DriftExecutionRecordResponse(**record)
+    except Exception as exc:
+        _raise_drift_execution_http_error(exc)
+
+
+@router.get(
+    "/drift/execution/{execution_id}",
+    response_model=DriftExecutionRecordResponse,
+    tags=["Drift"],
+    summary="Get Drift execution request status",
+)
+async def get_drift_execution_status(
+    execution_id: str,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Return one owned Drift execution request."""
+    auth_user = _get_authenticated_user(authorization)
+    user_id, _wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        record = get_drift_execution_request_service().get_request(
+            user_id=user_id,
+            execution_id=execution_id,
+        )
+        return DriftExecutionRecordResponse(**record)
+    except Exception as exc:
+        _raise_drift_execution_http_error(exc)
+
+
+@router.post(
+    "/drift/execution/submit",
+    response_model=DriftExecutionSubmitResponse,
+    tags=["Drift"],
+    summary="Submit signed same-wallet Drift transaction",
+)
+async def submit_drift_execution(
+    request: DriftExecutionSubmitRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Submit a signed same-wallet Drift transaction to Solana RPC."""
+    _require_drift_execution_api_enabled()
+    auth_user = _get_authenticated_user(authorization)
+    user_id, _wallet_address = _require_wallet_authenticated_user(auth_user)
+    _require_same_wallet_execution_status(user_id)
+
+    service = get_drift_execution_request_service()
+    try:
+        record = service.get_request(user_id=user_id, execution_id=request.execution_id)
+        raw_tx = _decode_signed_transaction(
+            request.signed_transaction,
+            request.transaction_encoding,
+        )
+
+        try:
+            from solana.rpc.async_api import AsyncClient
+            from solana.rpc.types import TxOpts
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Submitting signed Drift transactions requires the optional Solana Python client dependency."
+                ),
+            ) from exc
+
+        client = AsyncClient(settings.DRIFT_RPC_URL)
+        try:
+            response = await client.send_raw_transaction(
+                raw_tx,
+                opts=TxOpts(
+                    skip_preflight=request.skip_preflight,
+                    max_retries=request.max_retries,
+                ),
+            )
+        finally:
+            await client.close()
+
+        tx_signature = str(response.value)
+        updated = service.mark_submitted(
+            user_id=user_id,
+            execution_id=request.execution_id,
+            transaction_signature=tx_signature,
+        )
+        return DriftExecutionSubmitResponse(
+            success=True,
+            execution_id=request.execution_id,
+            status=updated["status"],
+            transaction_signature=tx_signature,
+            submitted_at=updated["submitted_at"],
+            rpc_url=settings.DRIFT_RPC_URL,
+            detail="Signed transaction submitted to Solana RPC.",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        try:
+            service.mark_failed(
+                user_id=user_id,
+                execution_id=request.execution_id,
+                error=str(exc),
+            )
+        except Exception:
+            pass
+        _raise_drift_execution_http_error(exc)
+
+
+# ============================================================================
+# Exchange Connection Endpoints
+# ============================================================================
+
+@router.post(
+    "/exchange-connections/backpack",
+    response_model=ExchangeConnectionResponse,
+    tags=["Exchange Connections"],
+    summary="Create Backpack exchange connection",
+)
+async def create_backpack_exchange_connection(
+    request: ExchangeConnectionCreateRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Create an encrypted Backpack connection owned by one user."""
+    try:
+        auth_user = _get_authenticated_user(authorization)
+        service = get_exchange_connection_service()
+        user_id = _resolve_request_user_id(
+            provided_user_id=request.user_id,
+            auth_user=auth_user,
+        )
+        user_id = _require_resolved_user_id(user_id)
+        record = service.create_connection(
+            user_id=user_id,
+            exchange="backpack",
+            label=request.label,
+            api_key=request.api_key,
+            api_secret=request.api_secret,
+            trading_enabled=request.trading_enabled,
+            read_only=request.read_only,
+            is_active=request.is_active,
+        )
+        return ExchangeConnectionResponse(**record)
+    except Exception as exc:
+        logger.error(f"Error creating Backpack exchange connection: {exc}")
+        _raise_exchange_connection_http_error(exc)
+
+
+@router.get(
+    "/exchange-connections",
+    response_model=ExchangeConnectionListResponse,
+    tags=["Exchange Connections"],
+    summary="List exchange connections",
+)
+async def list_exchange_connections(
+    user_id: Optional[str] = Query(None, description="User ID that owns the connections"),
+    exchange: Optional[str] = Query(None, description="Optional exchange filter"),
+    authorization: Optional[str] = Header(default=None),
+):
+    """List stored exchange connections for one user."""
+    try:
+        auth_user = _get_authenticated_user(authorization)
+        resolved_user_id = _resolve_request_user_id(
+            provided_user_id=user_id,
+            auth_user=auth_user,
+        )
+        resolved_user_id = _require_resolved_user_id(resolved_user_id)
+        service = get_exchange_connection_service()
+        connections = service.list_connections(user_id=resolved_user_id, exchange=exchange)
+        return ExchangeConnectionListResponse(
+            user_id=resolved_user_id,
+            connections=[ExchangeConnectionResponse(**item) for item in connections],
+            total=len(connections),
+        )
+    except Exception as exc:
+        logger.error(f"Error listing exchange connections: {exc}")
+        _raise_exchange_connection_http_error(exc)
+
+
+@router.patch(
+    "/exchange-connections/{connection_id}",
+    response_model=ExchangeConnectionResponse,
+    tags=["Exchange Connections"],
+    summary="Update exchange connection metadata",
+)
+async def update_exchange_connection(
+    connection_id: str,
+    request: ExchangeConnectionUpdateRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Update non-secret metadata for one stored exchange connection."""
+    try:
+        auth_user = _get_authenticated_user(authorization)
+        user_id = _resolve_request_user_id(
+            provided_user_id=request.user_id,
+            auth_user=auth_user,
+        )
+        user_id = _require_resolved_user_id(user_id)
+        service = get_exchange_connection_service()
+        record = service.update_connection(
+            user_id=user_id,
+            connection_id=connection_id,
+            label=request.label,
+            trading_enabled=request.trading_enabled,
+            read_only=request.read_only,
+            is_active=request.is_active,
+        )
+        return ExchangeConnectionResponse(**record)
+    except Exception as exc:
+        logger.error(f"Error updating exchange connection {connection_id}: {exc}")
+        _raise_exchange_connection_http_error(exc)
+
+
+@router.delete(
+    "/exchange-connections/{connection_id}",
+    response_model=ExchangeConnectionDeleteResponse,
+    tags=["Exchange Connections"],
+    summary="Delete exchange connection",
+)
+async def delete_exchange_connection(
+    connection_id: str,
+    user_id: Optional[str] = Query(None, description="User ID that owns the connection"),
+    authorization: Optional[str] = Header(default=None),
+):
+    """Delete one stored exchange connection."""
+    try:
+        auth_user = _get_authenticated_user(authorization)
+        resolved_user_id = _resolve_request_user_id(
+            provided_user_id=user_id,
+            auth_user=auth_user,
+        )
+        resolved_user_id = _require_resolved_user_id(resolved_user_id)
+        service = get_exchange_connection_service()
+        result = service.delete_connection(user_id=resolved_user_id, connection_id=connection_id)
+        return ExchangeConnectionDeleteResponse(**result)
+    except Exception as exc:
+        logger.error(f"Error deleting exchange connection {connection_id}: {exc}")
+        _raise_exchange_connection_http_error(exc)
 
 
 # ============================================================================
@@ -590,26 +1141,52 @@ async def delete_agent_attachment(file_id: str):
     summary="Chat with Rabit agent using temporary multimodal uploads",
     tags=["Agent"],
 )
-async def chat_with_agent(request: AgentChatRequest):
+async def chat_with_agent(
+    request: AgentChatRequest,
+    authorization: Optional[str] = Header(default=None),
+):
     """Chat with the Rabit agent using optional uploaded image/PDF attachments."""
     upload_manager = get_upload_manager()
 
     try:
+        auth_user = _get_authenticated_user(authorization)
         attachments = upload_manager.resolve_attachments(request.attachment_ids)
-        agent = get_agent(scope_id=request.scope_id, user_id=request.user_id)
+        resolved_user_id = _resolve_request_user_id(
+            provided_user_id=request.user_id,
+            auth_user=auth_user,
+        )
+        agent = get_agent(scope_id=request.scope_id, user_id=resolved_user_id)
         response = await agent.process_trading_query(
             request.message,
             attachments=attachments,
             conversation_style=request.conversation_style,
             trading_style=request.trading_style,
+            market_context=request.market_context.model_dump() if request.market_context else None,
+            backpack_execution=request.backpack_execution.model_dump() if request.backpack_execution else None,
+            drift_execution=request.drift_execution.model_dump() if request.drift_execution else None,
         )
 
         return AgentChatResponse(
             response=response,
             scope_id=request.scope_id,
-            user_id=request.user_id,
+            user_id=resolved_user_id,
             conversation_style=_serialize_conversation_style(agent.last_conversation_style),
             trading_style=_serialize_trading_style(agent.last_trading_style),
+            market_context=_serialize_market_context(getattr(agent, "last_market_context", request.market_context)),
+            backpack_execution=_serialize_backpack_execution(
+                getattr(
+                    agent,
+                    "last_backpack_execution",
+                    request.backpack_execution.model_dump() if request.backpack_execution else None,
+                )
+            ),
+            drift_execution=_serialize_drift_execution(
+                getattr(
+                    agent,
+                    "last_drift_execution",
+                    request.drift_execution.model_dump() if request.drift_execution else None,
+                )
+            ),
             attachment_ids=request.attachment_ids,
             intent=_serialize_agent_intent(agent),
         )
@@ -625,8 +1202,17 @@ async def chat_with_agent(request: AgentChatRequest):
     summary="Stream Rabit agent chat events over SSE",
     tags=["Agent"],
 )
-async def stream_chat_with_agent(request: AgentChatRequest):
+async def stream_chat_with_agent(
+    request: AgentChatRequest,
+    authorization: Optional[str] = Header(default=None),
+):
     """Stream agent output, thinking summary, plan, hint, and error events over SSE."""
+
+    auth_user = _get_authenticated_user(authorization)
+    resolved_user_id = _resolve_request_user_id(
+        provided_user_id=request.user_id,
+        auth_user=auth_user,
+    )
 
     async def event_generator():
         queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
@@ -639,7 +1225,7 @@ async def stream_chat_with_agent(request: AgentChatRequest):
             try:
                 upload_manager = get_upload_manager()
                 attachments = upload_manager.resolve_attachments(request.attachment_ids)
-                agent = get_agent(scope_id=request.scope_id, user_id=request.user_id)
+                agent = get_agent(scope_id=request.scope_id, user_id=resolved_user_id)
 
                 response = await agent.process_stream(
                     request.message,
@@ -648,6 +1234,9 @@ async def stream_chat_with_agent(request: AgentChatRequest):
                     attachments=attachments,
                     conversation_style=request.conversation_style,
                     trading_style=request.trading_style,
+                    market_context=request.market_context.model_dump() if request.market_context else None,
+                    backpack_execution=request.backpack_execution.model_dump() if request.backpack_execution else None,
+                    drift_execution=request.drift_execution.model_dump() if request.drift_execution else None,
                 )
 
                 await emit(
@@ -657,12 +1246,33 @@ async def stream_chat_with_agent(request: AgentChatRequest):
                         "status": "completed",
                         "response": response,
                         "scope_id": request.scope_id,
-                        "user_id": request.user_id,
+                        "user_id": resolved_user_id,
                         "conversation_style": _serialize_conversation_style(
                             getattr(agent, "last_conversation_style", request.conversation_style)
                         ),
                         "trading_style": _serialize_trading_style(
                             getattr(agent, "last_trading_style", request.trading_style)
+                        ),
+                        "market_context": _serialize_market_context(
+                            getattr(
+                                agent,
+                                "last_market_context",
+                                request.market_context.model_dump() if request.market_context else None,
+                            )
+                        ),
+                        "backpack_execution": _serialize_backpack_execution(
+                            getattr(
+                                agent,
+                                "last_backpack_execution",
+                                request.backpack_execution.model_dump() if request.backpack_execution else None,
+                            )
+                        ),
+                        "drift_execution": _serialize_drift_execution(
+                            getattr(
+                                agent,
+                                "last_drift_execution",
+                                request.drift_execution.model_dump() if request.drift_execution else None,
+                            )
                         ),
                         "attachment_ids": request.attachment_ids,
                         "intent": _serialize_agent_intent(agent),
@@ -688,6 +1298,27 @@ async def stream_chat_with_agent(request: AgentChatRequest):
                         ),
                         "trading_style": _serialize_trading_style(
                             getattr(agent, "last_trading_style", request.trading_style)
+                        ),
+                        "market_context": _serialize_market_context(
+                            getattr(
+                                agent,
+                                "last_market_context",
+                                request.market_context.model_dump() if request.market_context else None,
+                            )
+                        ),
+                        "backpack_execution": _serialize_backpack_execution(
+                            getattr(
+                                agent,
+                                "last_backpack_execution",
+                                request.backpack_execution.model_dump() if request.backpack_execution else None,
+                            )
+                        ),
+                        "drift_execution": _serialize_drift_execution(
+                            getattr(
+                                agent,
+                                "last_drift_execution",
+                                request.drift_execution.model_dump() if request.drift_execution else None,
+                            )
                         ),
                         "intent": _serialize_agent_intent(agent),
                     },
@@ -715,6 +1346,27 @@ async def stream_chat_with_agent(request: AgentChatRequest):
                         ),
                         "trading_style": _serialize_trading_style(
                             getattr(agent, "last_trading_style", request.trading_style)
+                        ),
+                        "market_context": _serialize_market_context(
+                            getattr(
+                                agent,
+                                "last_market_context",
+                                request.market_context.model_dump() if request.market_context else None,
+                            )
+                        ),
+                        "backpack_execution": _serialize_backpack_execution(
+                            getattr(
+                                agent,
+                                "last_backpack_execution",
+                                request.backpack_execution.model_dump() if request.backpack_execution else None,
+                            )
+                        ),
+                        "drift_execution": _serialize_drift_execution(
+                            getattr(
+                                agent,
+                                "last_drift_execution",
+                                request.drift_execution.model_dump() if request.drift_execution else None,
+                            )
                         ),
                         "intent": _serialize_agent_intent(agent),
                     },

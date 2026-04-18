@@ -10,6 +10,9 @@ class DummyStreamingAgent:
         self.calls = []
         self.last_conversation_style = "normal"
         self.last_trading_style = "balanced"
+        self.last_market_context = {"scope_mode": "global", "market_state": {}}
+        self.last_backpack_execution = {"enabled": False, "exchange": "backpack"}
+        self.last_drift_execution = {"enabled": False, "exchange": "drift"}
         self.last_intent = {
             "intent": "plan_or_strategy",
             "goal_summary": "Stream a guided plan",
@@ -26,9 +29,15 @@ class DummyStreamingAgent:
         attachments=None,
         conversation_style="normal",
         trading_style="balanced",
+        market_context=None,
+        backpack_execution=None,
+        drift_execution=None,
     ):
         self.last_conversation_style = conversation_style
         self.last_trading_style = trading_style
+        self.last_market_context = market_context or {"scope_mode": "global", "market_state": {}}
+        self.last_backpack_execution = backpack_execution or {"enabled": False, "exchange": "backpack"}
+        self.last_drift_execution = drift_execution or {"enabled": False, "exchange": "drift"}
         self.calls.append(
             {
                 "message": message,
@@ -36,6 +45,9 @@ class DummyStreamingAgent:
                 "attachments": attachments or [],
                 "conversation_style": conversation_style,
                 "trading_style": trading_style,
+                "market_context": market_context,
+                "backpack_execution": backpack_execution,
+                "drift_execution": drift_execution,
             }
         )
         await event_emitter(
@@ -102,6 +114,23 @@ def test_agent_chat_stream_returns_sse_events(monkeypatch, tmp_path):
             "user_id": "user-123",
             "conversation_style": "learning",
             "trading_style": "risk_first",
+            "market_context": {
+                "scope_mode": "locked_asset",
+                "symbol": "BTC",
+                "timeframe": "1H",
+                "market_state": {
+                    "trend_bias": "bearish",
+                    "momentum_state": "improving",
+                },
+            },
+            "backpack_execution": {
+                "enabled": True,
+                "exchange": "backpack",
+            },
+            "drift_execution": {
+                "enabled": False,
+                "exchange": "drift"
+            },
             "attachment_ids": [],
         },
     ) as response:
@@ -116,8 +145,14 @@ def test_agent_chat_stream_returns_sse_events(monkeypatch, tmp_path):
     assert '"status": "completed"' in body
     assert '"conversation_style": "learning"' in body
     assert '"trading_style": "risk_first"' in body
+    assert '"scope_mode": "locked_asset"' in body
+    assert '"backpack_execution": {"enabled": true, "exchange": "backpack"}' in body
+    assert '"drift_execution": {"enabled": false, "exchange": "drift"}' in body
     assert '"intent": {"intent": "plan_or_strategy"' in body
     assert agent.calls[0]["message"] == "Stream this plan"
     assert agent.calls[0]["conversation_style"] == "learning"
     assert agent.calls[0]["trading_style"] == "risk_first"
+    assert agent.calls[0]["market_context"]["symbol"] == "BTC"
+    assert agent.calls[0]["backpack_execution"]["enabled"] is True
+    assert agent.calls[0]["drift_execution"]["enabled"] is False
     assert agent.calls[0]["use_tools"] is True

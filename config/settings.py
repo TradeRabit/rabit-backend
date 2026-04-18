@@ -21,6 +21,14 @@ class Settings:
     # Drift Protocol
     DRIFT_RPC_URL = os.getenv("DRIFT_RPC_URL", "https://api.mainnet-beta.solana.com")
     DRIFT_PROGRAM_ID = os.getenv("DRIFT_PROGRAM_ID", "dRiftyHA39MWEi3m9aunc5MzRF1JYJjb5ciH7N27eNn")
+    DRIFT_EXECUTION_ENABLED = os.getenv("DRIFT_EXECUTION_ENABLED", "false").lower() == "true"
+    DRIFT_EXECUTION_REQUESTS_DB_PATH = os.getenv(
+        "DRIFT_EXECUTION_REQUESTS_DB_PATH",
+        "data/drift_execution_requests.json",
+    )
+    DRIFT_EXECUTION_PREPARE_TTL_SECONDS = int(
+        os.getenv("DRIFT_EXECUTION_PREPARE_TTL_SECONDS", "900")
+    )
     
     # WebSocket
     WS_HOST = os.getenv("WS_HOST", "0.0.0.0")
@@ -37,8 +45,12 @@ class Settings:
     DRIFT_ASSETS = TRADING_ASSETS
     
     # Backpack Exchange
+    BACKPACK_API_URL = os.getenv("BACKPACK_API_URL", "https://api.backpack.exchange")
+    BACKPACK_API_KEY = os.getenv("BACKPACK_API_KEY", "").strip()
+    BACKPACK_API_SECRET = os.getenv("BACKPACK_API_SECRET", "").strip()
     BACKPACK_WS_URL = os.getenv("BACKPACK_WS_URL", "wss://ws.backpack.exchange")
     BACKPACK_ENABLED = os.getenv("BACKPACK_ENABLED", "true").lower() == "true"
+    BACKPACK_EXECUTION_ENABLED = os.getenv("BACKPACK_EXECUTION_ENABLED", "false").lower() == "true"
     BACKPACK_QUOTE_ASSET = os.getenv("BACKPACK_QUOTE_ASSET", "USDC")  # SOL_USDC, BTC_USDC
     BACKPACK_SUBSCRIBE_ASSETS = int(os.getenv("BACKPACK_SUBSCRIBE_ASSETS", "25"))
     
@@ -75,6 +87,27 @@ class Settings:
 
     # Tool feature gates
     WEB_SEARCH_ENABLED = os.getenv("WEB_SEARCH_ENABLED", "true").lower() == "true"
+
+    # Exchange connection storage
+    EXCHANGE_CONNECTIONS_DB_PATH = os.getenv(
+        "EXCHANGE_CONNECTIONS_DB_PATH",
+        "data/exchange_connections.json",
+    )
+    EXCHANGE_CREDENTIALS_MASTER_KEY = os.getenv(
+        "EXCHANGE_CREDENTIALS_MASTER_KEY",
+        "",
+    ).strip()
+
+    # Mobile wallet auth
+    AUTH_JWT_SECRET = os.getenv("AUTH_JWT_SECRET", "").strip()
+    AUTH_JWT_ISSUER = os.getenv("AUTH_JWT_ISSUER", "rabit-backend")
+    AUTH_JWT_AUDIENCE = os.getenv("AUTH_JWT_AUDIENCE", "rabit-mobile")
+    AUTH_JWT_TTL_SECONDS = int(os.getenv("AUTH_JWT_TTL_SECONDS", "604800"))
+    WALLET_AUTH_NONCE_DB_PATH = os.getenv(
+        "WALLET_AUTH_NONCE_DB_PATH",
+        "data/wallet_auth_nonces.json",
+    )
+    WALLET_AUTH_NONCE_TTL_SECONDS = int(os.getenv("WALLET_AUTH_NONCE_TTL_SECONDS", "300"))
     
     # SearXNG Configuration (Not used - using DuckDuckGo instead)
     SEARXNG_ENABLED = os.getenv("SEARXNG_ENABLED", "false").lower() == "true"

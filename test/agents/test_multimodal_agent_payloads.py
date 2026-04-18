@@ -2,6 +2,8 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+from agents.backpack_execution import normalize_backpack_execution
+from agents.drift_execution import normalize_drift_execution
 from agents.core.base import BaseAgent
 from agents.uploads import AgentAttachment
 
@@ -34,6 +36,9 @@ class DummyAsyncMessagesAPI:
                 SimpleNamespace(
                     text=(
                         '{"intent":"market_analysis","user_goal_type":"analyze","goal_summary":"Analyze the user request",'
+                        '"analysis_mode":"technical","analysis_scope":"full_setup",'
+                        '"indicator_preference":"indicator_light","need_indicator_confirmation":false,'
+                        '"inferred_indicator_hint":"trend indicators",'
                         '"confidence":"high","preferred_tool_groups":["market","research","chart","ui"],'
                         '"routing_reason":"The user asks for analysis",'
                         '"response_language":"english","should_clarify":false,'
@@ -78,6 +83,8 @@ def test_base_agent_builds_multimodal_payload_and_memory_summary(monkeypatch, tm
     monkeypatch.setattr("agents.core.base.Anthropic", DummyAnthropic)
     monkeypatch.setattr("agents.core.base.AsyncAnthropic", DummyAsyncAnthropic)
     monkeypatch.setattr("agents.core.base.get_mem0_client", lambda: DummyMem0Client())
+    monkeypatch.setattr("agents.backpack_execution.policy.settings.BACKPACK_EXECUTION_ENABLED", True)
+    monkeypatch.setattr("agents.drift_execution.policy.settings.DRIFT_EXECUTION_ENABLED", True)
 
     agent = BaseAgent(name="test-agent", system_prompt="You are helpful.")
     attachment = make_attachment(
@@ -94,6 +101,19 @@ def test_base_agent_builds_multimodal_payload_and_memory_summary(monkeypatch, tm
             attachments=[attachment],
             conversation_style="concise",
             trading_style="trend_following",
+            market_context={
+                "scope_mode": "locked_asset",
+                "symbol": "BTC",
+                "timeframe": "4H",
+            },
+            backpack_execution={
+                "enabled": True,
+                "exchange": "backpack",
+            },
+            drift_execution={
+                "enabled": False,
+                "exchange": "drift",
+            },
         )
     )
 
@@ -106,6 +126,16 @@ def test_base_agent_builds_multimodal_payload_and_memory_summary(monkeypatch, tm
     assert user_message["content"][0]["type"] == "text"
     assert user_message["content"][1]["type"] == "image"
     assert user_message["content"][1]["source"]["media_type"] == "image/png"
+    assert '"enabled": true' in call["system"]
+    assert "Backpack live trade execution is enabled for this request." in call["system"]
+    assert '- drift_execution: {"enabled": false, "exchange": "drift"}' in call["system"]
+    assert "Drift live trade execution is disabled for this request." in call["system"]
+    assert agent.last_backpack_execution == normalize_backpack_execution(
+        {"enabled": True, "exchange": "backpack"}
+    )
+    assert agent.last_drift_execution == normalize_drift_execution(
+        {"enabled": False, "exchange": "drift"}
+    )
 
     history = agent.get_conversation_history()
     assert history[-2]["role"] == "user"
@@ -117,6 +147,8 @@ def test_base_agent_builds_document_block(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("agents.core.base.Anthropic", DummyAnthropic)
     monkeypatch.setattr("agents.core.base.AsyncAnthropic", DummyAsyncAnthropic)
     monkeypatch.setattr("agents.core.base.get_mem0_client", lambda: DummyMem0Client())
+    monkeypatch.setattr("agents.backpack_execution.policy.settings.BACKPACK_EXECUTION_ENABLED", True)
+    monkeypatch.setattr("agents.drift_execution.policy.settings.DRIFT_EXECUTION_ENABLED", True)
 
     agent = BaseAgent(name="doc-agent", system_prompt="You are helpful.")
     attachment = make_attachment(
@@ -133,6 +165,9 @@ def test_base_agent_builds_document_block(monkeypatch, tmp_path: Path):
             attachments=[attachment],
             conversation_style="formal",
             trading_style="systematic",
+            market_context={"scope_mode": "global"},
+            backpack_execution={"enabled": False, "exchange": "backpack"},
+            drift_execution={"enabled": True, "exchange": "drift"},
         )
     )
 
@@ -148,6 +183,8 @@ def test_base_agent_injects_mem0_context_into_system_prompt(monkeypatch):
     monkeypatch.setattr("agents.core.base.AsyncAnthropic", DummyAsyncAnthropic)
     dummy_mem0 = DummyMem0Client("Relevant long-term user memory:\n- User prefers SOL trades")
     monkeypatch.setattr("agents.core.base.get_mem0_client", lambda: dummy_mem0)
+    monkeypatch.setattr("agents.backpack_execution.policy.settings.BACKPACK_EXECUTION_ENABLED", True)
+    monkeypatch.setattr("agents.drift_execution.policy.settings.DRIFT_EXECUTION_ENABLED", True)
 
     agent = BaseAgent(
         name="memory-agent",
@@ -160,6 +197,18 @@ def test_base_agent_injects_mem0_context_into_system_prompt(monkeypatch):
             "What should I trade today?",
             conversation_style="learning",
             trading_style="risk_first",
+            market_context={
+                "scope_mode": "locked_asset",
+                "symbol": "SOL",
+                "timeframe": "1H",
+                "market_state": {
+                    "trend_bias": "bullish",
+                    "structure_position": "near_support",
+                    "summary": "SOL is holding above support.",
+                },
+            },
+            backpack_execution={"enabled": False, "exchange": "backpack"},
+            drift_execution={"enabled": True, "exchange": "drift"},
         )
     )
 
@@ -169,7 +218,18 @@ def test_base_agent_injects_mem0_context_into_system_prompt(monkeypatch):
     assert dummy_mem0.calls[0]["user_id"] == "user-99"
     assert "intent: market_analysis" in call["system"]
     assert "user_goal_type: analyze" in call["system"]
+    assert "analysis_mode: technical" in call["system"]
+    assert "analysis_scope: full_setup" in call["system"]
+    assert "indicator_preference: indicator_light" in call["system"]
+    assert "inferred_indicator_hint: trend indicators" in call["system"]
     assert "conversation_style: learning" in call["system"]
     assert "trading_style: risk_first" in call["system"]
+    assert '"scope_mode": "locked_asset"' in call["system"]
+    assert '"symbol": "SOL"' in call["system"]
+    assert "SOL is holding above support." in call["system"]
+    assert '- backpack_execution: {"enabled": false, "exchange": "backpack"}' in call["system"]
+    assert "Backpack live trade execution is disabled for this request." in call["system"]
+    assert '- drift_execution: {"enabled": true, "exchange": "drift"}' in call["system"]
+    assert "Drift live trade execution is enabled for this request." in call["system"]
     assert "response_language: english" in call["system"]
     assert "should_clarify: false" in call["system"]

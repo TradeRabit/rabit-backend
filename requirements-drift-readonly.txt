@@ -1,0 +1,62 @@
+# Drift read-only support for Rabit backend
+#
+# Install this file only if you want the authenticated Drift account read-only
+# tools to work locally:
+# - drift_get_account_snapshot
+# - drift_get_balances
+# - drift_get_collateral
+# - drift_get_open_orders
+# - drift_get_positions
+# - drift_get_open_positions
+#
+# Notes:
+# - This file intentionally reflects the versions that were verified to import
+#   and run in this repo on Python 3.11 Windows.
+# - We intentionally do not pin zstandard==0.18.0 here because that package
+#   requires local MSVC build tooling in this environment and the current
+#   read-only Drift path works without it.
+
+driftpy==0.8.89
+anchorpy==0.21.0
+anchorpy-core==0.2.0
+solana==0.36.11
+solders==0.26.0
+based58==0.1.1
+borsh-construct==0.1.0
+construct==2.10.68
+construct-typing==0.5.3
+pyheck==0.1.5
+toolz==0.11.2
+toml==0.10.2
+base58==2.1.1
+sumtypes==0.1a6
+deprecated==1.3.1
+jsonrpcclient==4.0.3
+jsonrpcserver==5.0.9
+events==0.5
+oslash==0.6.3
+more-itertools==8.14.0
+cachetools==7.0.5
+tqdm==4.67.1
+types-cachetools==4.2.10
+pyrsistent==0.19.2
+tomli==2.0.1
+async-timeout==4.0.3
+backoff==2.2.1
+loguru==0.7.3
+psutil==5.9.4
+pycares==4.3.0
+aiodns==3.0.0
+grpcio==1.68.1
+pythclient==0.2.1
+apischema==0.17.5
+rfc3986==1.5.0
+py==1.11.0
+pycodestyle==2.10.0
+pyflakes==3.0.1
+mccabe==0.7.0
+exceptiongroup==1.0.4
+
+# Restores pytest compatibility after anchorpy installs its legacy plugin.
+pytest-asyncio==1.3.0
+pytest-xprocess==1.0.2

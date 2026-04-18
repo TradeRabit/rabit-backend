@@ -6,6 +6,10 @@ from typing import Any, Dict, List, Optional
 
 from anthropic import Anthropic, AsyncAnthropic
 
+from agents.backpack_execution import (
+    get_backpack_execution_guidance,
+    normalize_backpack_execution,
+)
 from agents.compression import ConversationCompressor
 from agents.conversation_style import (
     CONVERSATION_STYLE_NORMAL,
@@ -13,12 +17,23 @@ from agents.conversation_style import (
     normalize_conversation_style,
 )
 from agents.intent_router import AgentIntentContext, build_intent_prompt, parse_intent_response
+from agents.drift_execution import (
+    get_drift_execution_guidance,
+    normalize_drift_execution,
+)
 from agents.memory import ConversationMemory, Mem0Error, Message, get_mem0_client
+from agents.market_context import get_market_context_guidance, normalize_market_context
 from agents.tools import ToolResult, tool_registry
 from agents.tools.core.runtime_context import (
+    reset_current_backpack_execution,
+    reset_current_drift_execution,
     reset_current_event_emitter,
+    reset_current_market_context,
     reset_current_user_id,
+    set_current_backpack_execution,
+    set_current_drift_execution,
     set_current_event_emitter,
+    set_current_market_context,
     set_current_user_id,
 )
 from agents.uploads import AgentAttachment
@@ -84,6 +99,9 @@ class BaseAgent:
         self.last_intent = AgentIntentContext.fallback("No request processed yet.")
         self.last_conversation_style = CONVERSATION_STYLE_NORMAL
         self.last_trading_style = TRADING_STYLE_BALANCED
+        self.last_market_context = normalize_market_context(None)
+        self.last_backpack_execution = normalize_backpack_execution(None)
+        self.last_drift_execution = normalize_drift_execution(None)
 
         logger.info(f"Agent scope: {scope_id or 'global'}")
 
@@ -126,6 +144,9 @@ class BaseAgent:
         attachments: Optional[List[AgentAttachment]] = None,
         conversation_style: str = CONVERSATION_STYLE_NORMAL,
         trading_style: str = TRADING_STYLE_BALANCED,
+        market_context: Optional[Dict[str, Any]] = None,
+        backpack_execution: Optional[Dict[str, Any]] = None,
+        drift_execution: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Process user input with auto-compression and optional multimodal attachments.
@@ -136,6 +157,7 @@ class BaseAgent:
             attachments: Optional uploaded files to send to the model
             conversation_style: Requested response style from the frontend
             trading_style: Requested trading-analysis style from the frontend
+            market_context: Frontend market scope and market-state context
 
         Returns:
             Agent response
@@ -143,20 +165,29 @@ class BaseAgent:
         attachments = attachments or []
         conversation_style = normalize_conversation_style(conversation_style)
         trading_style = normalize_trading_style(trading_style)
+        market_context = normalize_market_context(market_context)
+        backpack_execution = normalize_backpack_execution(backpack_execution)
+        drift_execution = normalize_drift_execution(drift_execution)
         self.last_conversation_style = conversation_style
         self.last_trading_style = trading_style
+        self.last_market_context = market_context
+        self.last_backpack_execution = backpack_execution
+        self.last_drift_execution = drift_execution
         user_summary = self._build_memory_user_text(user_input, attachments)
         history = self.get_conversation_history()
         if self.compressor.needs_compression(history):
             logger.info(f"Auto-compressing conversation for agent: {self.name}")
             history = await self.compressor.compress(history)
-        intent_context = await self._route_intent(user_input, history)
+        intent_context = await self._route_intent(user_input, history, market_context)
         self.last_intent = intent_context
         effective_system_prompt = await self._build_effective_system_prompt(
             user_input,
             intent_context,
             conversation_style,
             trading_style,
+            market_context,
+            backpack_execution,
+            drift_execution,
         )
 
         messages = list(history)
@@ -200,6 +231,9 @@ class BaseAgent:
         attachments: Optional[List[AgentAttachment]] = None,
         conversation_style: str = CONVERSATION_STYLE_NORMAL,
         trading_style: str = TRADING_STYLE_BALANCED,
+        market_context: Optional[Dict[str, Any]] = None,
+        backpack_execution: Optional[Dict[str, Any]] = None,
+        drift_execution: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Process user input and emit streaming UI/text events.
@@ -211,6 +245,7 @@ class BaseAgent:
             attachments: Optional uploaded files
             conversation_style: Requested response style from the frontend
             trading_style: Requested trading-analysis style from the frontend
+            market_context: Frontend market scope and market-state context
 
         Returns:
             Final agent response text
@@ -218,20 +253,29 @@ class BaseAgent:
         attachments = attachments or []
         conversation_style = normalize_conversation_style(conversation_style)
         trading_style = normalize_trading_style(trading_style)
+        market_context = normalize_market_context(market_context)
+        backpack_execution = normalize_backpack_execution(backpack_execution)
+        drift_execution = normalize_drift_execution(drift_execution)
         self.last_conversation_style = conversation_style
         self.last_trading_style = trading_style
+        self.last_market_context = market_context
+        self.last_backpack_execution = backpack_execution
+        self.last_drift_execution = drift_execution
         user_summary = self._build_memory_user_text(user_input, attachments)
         history = self.get_conversation_history()
         if self.compressor.needs_compression(history):
             logger.info(f"Auto-compressing conversation for agent: {self.name}")
             history = await self.compressor.compress(history)
-        intent_context = await self._route_intent(user_input, history)
+        intent_context = await self._route_intent(user_input, history, market_context)
         self.last_intent = intent_context
         effective_system_prompt = await self._build_effective_system_prompt(
             user_input,
             intent_context,
             conversation_style,
             trading_style,
+            market_context,
+            backpack_execution,
+            drift_execution,
         )
 
         messages = list(history)
@@ -286,6 +330,9 @@ class BaseAgent:
             allowed_names=intent_context.allowed_tool_names
         )
         user_token = set_current_user_id(self.user_id)
+        backpack_execution_token = set_current_backpack_execution(self.last_backpack_execution)
+        drift_execution_token = set_current_drift_execution(self.last_drift_execution)
+        market_context_token = set_current_market_context(self.last_market_context)
 
         try:
             response = self.client.messages.create(
@@ -336,6 +383,9 @@ class BaseAgent:
 
             return self._extract_response_text(response)
         finally:
+            reset_current_market_context(market_context_token)
+            reset_current_drift_execution(drift_execution_token)
+            reset_current_backpack_execution(backpack_execution_token)
             reset_current_user_id(user_token)
 
     async def _process_with_tools_stream(
@@ -360,6 +410,9 @@ class BaseAgent:
             allowed_names=intent_context.allowed_tool_names
         )
         user_token = set_current_user_id(self.user_id)
+        backpack_execution_token = set_current_backpack_execution(self.last_backpack_execution)
+        drift_execution_token = set_current_drift_execution(self.last_drift_execution)
+        market_context_token = set_current_market_context(self.last_market_context)
         emitter_token = set_current_event_emitter(event_emitter)
 
         try:
@@ -413,6 +466,9 @@ class BaseAgent:
                 messages.append({"role": "user", "content": tool_results})
         finally:
             reset_current_event_emitter(emitter_token)
+            reset_current_market_context(market_context_token)
+            reset_current_drift_execution(drift_execution_token)
+            reset_current_backpack_execution(backpack_execution_token)
             reset_current_user_id(user_token)
 
     async def _stream_model_round(
@@ -528,11 +584,17 @@ class BaseAgent:
         intent_context: Optional[AgentIntentContext] = None,
         conversation_style: str = CONVERSATION_STYLE_NORMAL,
         trading_style: str = TRADING_STYLE_BALANCED,
+        market_context: Optional[Dict[str, Any]] = None,
+        backpack_execution: Optional[Dict[str, Any]] = None,
+        drift_execution: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Append long-term memory and intent guidance to the system prompt."""
         intent_context = intent_context or AgentIntentContext.fallback()
         normalized_style = normalize_conversation_style(conversation_style)
         normalized_trading_style = normalize_trading_style(trading_style)
+        normalized_market_context = normalize_market_context(market_context)
+        normalized_backpack_execution = normalize_backpack_execution(backpack_execution)
+        normalized_drift_execution = normalize_drift_execution(drift_execution)
         base_prompt = (
             f"{self.system_prompt}\n\n"
             "Current routing context:\n"
@@ -540,6 +602,12 @@ class BaseAgent:
             f"- user_goal_type: {intent_context.user_goal_type}\n"
             f"- confidence: {intent_context.confidence}\n"
             f"- goal_summary: {intent_context.goal_summary or 'n/a'}\n"
+            f"- analysis_mode: {intent_context.analysis_mode}\n"
+            f"- analysis_scope: {intent_context.analysis_scope}\n"
+            f"- indicator_preference: {intent_context.indicator_preference}\n"
+            f"- need_indicator_confirmation: "
+            f"{str(intent_context.need_indicator_confirmation).lower()}\n"
+            f"- inferred_indicator_hint: {intent_context.inferred_indicator_hint or 'n/a'}\n"
             f"- response_language: {intent_context.response_language}\n"
             f"- should_clarify: {str(intent_context.should_clarify).lower()}\n"
             f"- clarification_reason: {intent_context.clarification_reason or 'n/a'}\n"
@@ -548,11 +616,18 @@ class BaseAgent:
             f"{json.dumps(intent_context.suggested_hint_options, ensure_ascii=False)}\n"
             f"- conversation_style: {normalized_style}\n"
             f"- trading_style: {normalized_trading_style}\n"
+            f"- market_context: {json.dumps(normalized_market_context, ensure_ascii=False)}\n"
+            f"- backpack_execution: {json.dumps(normalized_backpack_execution, ensure_ascii=False)}\n"
+            f"- drift_execution: {json.dumps(normalized_drift_execution, ensure_ascii=False)}\n"
             f"- intent_guidance: {intent_context.system_guidance}\n"
             f"- goal_guidance: {intent_context.goal_guidance}\n"
+            f"- analysis_guidance: {intent_context.analysis_guidance}\n"
             f"- language_guidance: {intent_context.language_guidance}\n"
             f"- style_guidance: {get_conversation_style_guidance(normalized_style)}\n"
             f"- trading_style_guidance: {get_trading_style_guidance(normalized_trading_style)}\n"
+            f"- market_context_guidance: {get_market_context_guidance(normalized_market_context)}\n"
+            f"- backpack_execution_guidance: {get_backpack_execution_guidance(normalized_backpack_execution)}\n"
+            f"- drift_execution_guidance: {get_drift_execution_guidance(normalized_drift_execution)}\n"
             f"- clarification_guidance: {intent_context.clarification_guidance}"
         )
 
@@ -578,9 +653,10 @@ class BaseAgent:
         self,
         user_input: str,
         history: List[Dict[str, Any]],
+        market_context: Optional[Dict[str, Any]] = None,
     ) -> AgentIntentContext:
         """Route the latest user message into an intent context using the model."""
-        prompt = build_intent_prompt(user_input, history)
+        prompt = build_intent_prompt(user_input, history, market_context)
         try:
             response = await self.async_client.messages.create(
                 model=self.model,

@@ -29,6 +29,8 @@ from agents.tools.memory.mem0_tools import (
     delete_user_memory,
     get_user_memory,
 )
+from agents.tools.backpack_execution import register_backpack_execution_tools
+from agents.tools.drift_execution import register_drift_readonly_tools
 from agents.tools.ui.ui_stream_tools import show_hint, show_plan, show_thinking_summary
 
 logger = get_logger(__name__)
@@ -362,6 +364,14 @@ def register_trading_tools():
         function=stop_price_monitor
     ))
 
+    # ===== BACKPACK ACCOUNT / EXECUTION TOOLS =====
+
+    register_backpack_execution_tools()
+
+    # ===== DRIFT PUBLIC READ-ONLY TOOLS =====
+
+    register_drift_readonly_tools()
+
     # ===== LONG-TERM MEMORY TOOLS =====
 
     if settings.MEMORY_TOOLS_ENABLED:
@@ -500,5 +510,7 @@ def register_trading_tools():
     logger.info(
         "Registered trading tools with gates: "
         f"web_search={'on' if settings.WEB_SEARCH_ENABLED else 'off'}, "
-        f"memory_tools={'on' if settings.MEMORY_TOOLS_ENABLED else 'off'}"
+        f"memory_tools={'on' if settings.MEMORY_TOOLS_ENABLED else 'off'}, "
+        f"backpack_execution={'on' if settings.BACKPACK_EXECUTION_ENABLED else 'off'}, "
+        f"drift_execution={'on' if settings.DRIFT_EXECUTION_ENABLED else 'off'}"
     )

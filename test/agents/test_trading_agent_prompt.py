@@ -14,3 +14,6 @@ def test_trading_agent_uses_prompt_loader(monkeypatch):
     assert "show_hint" in agent.system_prompt
     assert "Respect Conversation Style" in agent.system_prompt
     assert "Respect Trading Style" in agent.system_prompt
+    assert "market context" in agent.system_prompt.lower()
+    assert "Backpack Execution Policy" in agent.system_prompt
+    assert "Drift Execution Policy" in agent.system_prompt
