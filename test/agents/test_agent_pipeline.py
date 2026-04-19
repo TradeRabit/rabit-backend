@@ -187,6 +187,20 @@ def test_build_pipeline_nodes_keeps_low_confidence_chart_requests_in_safe_mode()
         PIPELINE_NODE_RESPONSE_COMPOSER,
     ]
 
+    write_nodes = build_pipeline_nodes(
+        intent_context=AgentIntentContext(
+            intent="trade_setup",
+            confidence="low",
+            preferred_tool_groups=["market", "chart", "ui"],
+        ),
+        user_input="Mark support at 65000 on BTC and clear drawings",
+    )
+
+    assert [node.name for node in write_nodes] == [
+        PIPELINE_NODE_GENERAL_FALLBACK,
+        PIPELINE_NODE_RESPONSE_COMPOSER,
+    ]
+
 
 def test_build_pipeline_nodes_plans_chart_analysis_for_chart_requests():
     context = AgentIntentContext(
@@ -208,9 +222,37 @@ def test_build_pipeline_nodes_plans_chart_analysis_for_chart_requests():
         PIPELINE_NODE_RESPONSE_COMPOSER,
     ]
     assert nodes[0].instruction.startswith("Act as a chart-analysis specialist step.")
+    assert nodes[0].config["chart_mode"] == "analysis"
     assert nodes[0].config["allow_chart_write"] is False
     assert nodes[0].config["max_steps"] == 4
     assert nodes[1].config["max_headlines"] == 3
+
+
+def test_build_pipeline_nodes_enables_write_mode_for_chart_write_requests():
+    context = AgentIntentContext(
+        intent="trade_setup",
+        confidence="high",
+        preferred_tool_groups=["market", "chart", "ui"],
+    )
+
+    nodes = build_pipeline_nodes(
+        intent_context=context,
+        user_input="Clear drawings and mark support at 65000 on BTC 4h",
+    )
+
+    assert [node.name for node in nodes] == [
+        PIPELINE_NODE_CHART_ANALYSIS,
+        PIPELINE_NODE_MARKET_SNAPSHOT,
+        PIPELINE_NODE_RESPONSE_COMPOSER,
+    ]
+    assert nodes[0].config["chart_mode"] == "write"
+    assert nodes[0].config["allow_chart_write"] is True
+    assert nodes[0].config["capture_screenshot_after_write"] is True
+    assert nodes[0].config["llm_allowed_tool_names"] == [
+        "show_hint",
+        "show_plan",
+        "show_thinking_summary",
+    ]
 
 
 def test_build_pipeline_nodes_plans_research_snapshot_for_research_requests():
@@ -293,6 +335,23 @@ def test_effective_allowed_tool_names_respects_node_allow_and_block_lists(monkey
     )
 
     assert agent._get_effective_allowed_tool_names(clarification_context) == {"show_hint"}
+
+    write_context = AgentIntentContext(
+        intent="trade_setup",
+        confidence="high",
+        preferred_tool_groups=["market", "chart", "ui"],
+    )
+    agent.last_pipeline_trace = build_pipeline_trace(
+        entry_agent="TradingAgent",
+        intent_context=write_context,
+        user_input="Clear drawings and mark support at 65000 on BTC",
+    )
+
+    assert agent._get_effective_allowed_tool_names(write_context) == {
+        "show_hint",
+        "show_plan",
+        "show_thinking_summary",
+    }
 
 
 def test_base_agent_tracks_pipeline_trace(monkeypatch):
@@ -398,6 +457,68 @@ def test_base_agent_executes_chart_pipeline_nodes(monkeypatch):
     assert "tv_delete_alert" not in tool_names
     assert "tv_get_state" in tool_names
     assert "tv_add_indicator" in tool_names
+
+
+def test_base_agent_executes_chart_write_inside_same_node(monkeypatch):
+    monkeypatch.setattr("agents.core.base.Anthropic", DummyAnthropic)
+    monkeypatch.setattr("agents.core.base.AsyncAnthropic", DummyAsyncAnthropic)
+    monkeypatch.setattr("agents.core.base.get_mem0_client", lambda: DummyMem0Client())
+    register_trading_tools()
+
+    async def fake_route_intent(self, user_input, history, market_context=None):
+        return AgentIntentContext(
+            intent="trade_setup",
+            confidence="high",
+            preferred_tool_groups=["market", "chart", "ui"],
+        )
+
+    state = {"symbol": "BTC", "timeframe": "60", "indicators": []}
+    calls = []
+
+    async def fake_execute(name, arguments):
+        calls.append(name)
+        if name == "tv_get_state":
+            return SimpleNamespace(success=True, data={"data": dict(state)}, error=None)
+        if name == "tv_set_timeframe":
+            state["timeframe"] = arguments["timeframe"]
+            return SimpleNamespace(success=True, data={"timeframe": state["timeframe"]}, error=None)
+        if name == "tv_clear_drawings":
+            return SimpleNamespace(success=True, data={"cleared": True}, error=None)
+        if name == "tv_draw_horizontal_line":
+            return SimpleNamespace(success=True, data={"drawing_id": f"line-{arguments['price']}"}, error=None)
+        if name == "tv_capture_screenshot":
+            return SimpleNamespace(
+                success=True,
+                data={"data": {"screenshot_url": "http://localhost/screenshot.png"}, "screenshot_url": "http://localhost/screenshot.png"},
+                error=None,
+            )
+        if name == "get_price":
+            return SimpleNamespace(success=True, data={"success": True, "symbol": "BTC", "price": 65000}, error=None)
+        if name == "search_news_by_symbols":
+            return SimpleNamespace(success=True, data={"success": True, "results": {"BTC": []}}, error=None)
+        raise AssertionError(f"Unexpected tool call: {name}")
+
+    monkeypatch.setattr(BaseAgent, "_route_intent", fake_route_intent)
+    monkeypatch.setattr("agents.core.base.tool_registry.execute", fake_execute)
+
+    agent = BaseAgent(name="TradingAgent", system_prompt="You are helpful.")
+
+    response = asyncio.run(agent.process("Clear drawings and mark support at 65000 on BTC 4h", use_tools=True))
+
+    assert response == "Pipeline response ok"
+    assert [node.name for node in agent.last_pipeline_trace.pipeline_nodes] == [
+        PIPELINE_NODE_CHART_ANALYSIS,
+        PIPELINE_NODE_MARKET_SNAPSHOT,
+        PIPELINE_NODE_RESPONSE_COMPOSER,
+    ]
+    assert agent.last_pipeline_trace.pipeline_nodes[0].metadata["chart_mode"] == "write"
+    assert "tv_clear_drawings" in calls
+    assert "tv_draw_horizontal_line" in calls
+    assert "tv_capture_screenshot" in calls
+    assert "tv_add_indicator" not in calls
+    tool_names = {tool["name"] for tool in agent.client.messages.calls[0]["tools"]}
+    assert tool_names == {"show_hint", "show_plan", "show_thinking_summary"}
+    assert "Pipeline node instruction (chart_analysis):" in agent.client.messages.calls[0]["system"]
 
 
 def test_base_agent_executes_portfolio_pipeline_nodes(monkeypatch):

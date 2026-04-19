@@ -2,7 +2,7 @@
 Coin Information Models
 Data models untuk informasi coin dari CoinGecko yang disimpan di database
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Dict, List
 from datetime import datetime
 
@@ -24,6 +24,24 @@ class CoinInfo(BaseModel):
     Data ini disimpan permanen di database untuk menghindari rate limit
     Hanya untuk data yang jarang berubah (description, links, etc)
     """
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "bitcoin",
+                "symbol": "BTC",
+                "name": "Bitcoin",
+                "description": "Bitcoin is the first decentralized cryptocurrency...",
+                "links": {
+                    "website": "https://bitcoin.org",
+                    "twitter": "https://twitter.com/bitcoin",
+                    "explorer": "https://blockchain.info"
+                },
+                "categories": ["Cryptocurrency", "Layer 1"],
+                "last_updated": "2024-01-01T00:00:00Z"
+            }
+        }
+    )
+
     # Identifiers
     id: str = Field(..., description="CoinGecko ID (e.g., 'bitcoin')")
     symbol: str = Field(..., description="Symbol (e.g., 'BTC')")
@@ -47,19 +65,3 @@ class CoinInfo(BaseModel):
     # Metadata
     last_updated: datetime = Field(default_factory=datetime.utcnow, description="Last update from CoinGecko")
     
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "id": "bitcoin",
-                "symbol": "BTC",
-                "name": "Bitcoin",
-                "description": "Bitcoin is the first decentralized cryptocurrency...",
-                "links": {
-                    "website": "https://bitcoin.org",
-                    "twitter": "https://twitter.com/bitcoin",
-                    "explorer": "https://blockchain.info"
-                },
-                "categories": ["Cryptocurrency", "Layer 1"],
-                "last_updated": "2024-01-01T00:00:00Z"
-            }
-        }

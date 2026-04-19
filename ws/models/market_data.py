@@ -1,5 +1,5 @@
 """Market data models for WebSocket"""
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from datetime import datetime
 
@@ -19,7 +19,7 @@ class PriceUpdate(BaseModel):
     high_24h: Optional[float] = None
     low_24h: Optional[float] = None
     
-    timestamp: datetime = datetime.now()
+    timestamp: datetime = Field(default_factory=datetime.now)
 
 
 class OHLCData(BaseModel):
@@ -39,6 +39,8 @@ class OHLCData(BaseModel):
 
 class MarketData(BaseModel):
     """Combined market data"""
+    model_config = ConfigDict(from_attributes=True)
+
     symbol: str
     
     # Price data
@@ -53,7 +55,4 @@ class MarketData(BaseModel):
     
     # Metadata
     source: str  # "drift" or "binance"
-    timestamp: datetime = datetime.now()
-    
-    class Config:
-        from_attributes = True
+    timestamp: datetime = Field(default_factory=datetime.now)

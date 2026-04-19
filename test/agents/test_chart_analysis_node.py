@@ -131,3 +131,118 @@ def test_chart_analysis_global_scope_can_change_symbol_and_add_indicators():
     assert "tv_draw_line" not in tool_names
     assert "tv_create_alert" not in tool_names
     assert "Internal chart-analysis node observations" in result.system_prompt_addition
+
+
+def test_chart_write_mode_draws_levels_and_captures_screenshot():
+    state = {
+        "symbol": "BTC",
+        "timeframe": "60",
+        "indicators": [],
+    }
+    calls = []
+
+    async def call_tool(name, arguments):
+        calls.append((name, arguments))
+        if name == "tv_get_state":
+            return _success({"data": dict(state)})
+        if name == "tv_set_symbol":
+            state["symbol"] = arguments["symbol"]
+            return _success({"symbol": state["symbol"]})
+        if name == "tv_set_timeframe":
+            state["timeframe"] = arguments["timeframe"]
+            return _success({"timeframe": state["timeframe"]})
+        if name == "tv_clear_drawings":
+            return _success({"cleared": True})
+        if name == "tv_draw_horizontal_line":
+            return _success({"drawing_id": f"line-{arguments['price']}"})
+        if name == "tv_capture_screenshot":
+            return _success({"data": {"screenshot_url": "http://localhost/screenshot.png"}})
+        raise AssertionError(f"Unexpected tool call: {name}")
+
+    context = AgentNodeExecutionContext(
+        agent=object(),
+        user_input="Clear drawings and mark support at 65000 plus resistance at 68000 on ETH 4h",
+        messages=[],
+        system_prompt="base prompt",
+        intent_context=AgentIntentContext(
+            intent="trade_setup",
+            confidence="high",
+            preferred_tool_groups=["market", "chart", "ui"],
+        ),
+        market_context={"scope_mode": "global", "symbol": "BTC", "timeframe": "60"},
+        call_tool=call_tool,
+    )
+    plan = AgentPipelineNodePlan(
+        name="chart_analysis",
+        config={
+            "chart_mode": "write",
+            "allow_symbol_change_when_global": True,
+            "allow_chart_write": True,
+            "capture_screenshot_after_write": True,
+        },
+    )
+
+    result = asyncio.run(run_chart_analysis_node(context, plan))
+
+    tool_names = [name for name, _ in calls]
+    assert result.status == "completed"
+    assert result.metadata["chart_mode"] == "write"
+    assert result.metadata["effective_symbol"] == "ETH"
+    assert result.metadata["effective_timeframe"] == "240"
+    assert "tv_clear_drawings" in tool_names
+    assert tool_names.count("tv_draw_horizontal_line") == 2
+    assert "tv_capture_screenshot" in tool_names
+    assert "tv_add_indicator" not in tool_names
+    assert result.metadata["applied_actions"][0]["action"] == "clear_drawings"
+    assert "Internal chart-write node observations" in result.system_prompt_addition
+
+
+def test_chart_write_mode_blocks_symbol_change_for_locked_asset():
+    state = {
+        "symbol": "BTC",
+        "timeframe": "60",
+        "indicators": [],
+    }
+    calls = []
+
+    async def call_tool(name, arguments):
+        calls.append((name, arguments))
+        if name == "tv_get_state":
+            return _success({"data": dict(state)})
+        if name == "tv_draw_horizontal_line":
+            return _success({"drawing_id": "line-1"})
+        if name == "tv_capture_screenshot":
+            return _success({"data": {"screenshot_url": "http://localhost/screenshot.png"}})
+        raise AssertionError(f"Unexpected tool call: {name}")
+
+    context = AgentNodeExecutionContext(
+        agent=object(),
+        user_input="Mark support at 65000 on ETH",
+        messages=[],
+        system_prompt="base prompt",
+        intent_context=AgentIntentContext(
+            intent="trade_setup",
+            confidence="high",
+            preferred_tool_groups=["market", "chart", "ui"],
+        ),
+        market_context={"scope_mode": "locked_asset", "symbol": "BTC", "timeframe": "60"},
+        call_tool=call_tool,
+    )
+    plan = AgentPipelineNodePlan(
+        name="chart_analysis",
+        config={
+            "chart_mode": "write",
+            "allow_symbol_change_when_global": True,
+            "allow_chart_write": True,
+            "capture_screenshot_after_write": True,
+        },
+    )
+
+    result = asyncio.run(run_chart_analysis_node(context, plan))
+
+    tool_names = [name for name, _ in calls]
+    assert result.status == "completed"
+    assert result.metadata["symbol_change_blocked"] is True
+    assert result.metadata["effective_symbol"] == "BTC"
+    assert "tv_set_symbol" not in tool_names
+    assert "tv_draw_horizontal_line" in tool_names

@@ -6,7 +6,7 @@ import aiohttp
 import asyncio
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -14,6 +14,24 @@ logger = get_logger(__name__)
 
 class ModelInfo(BaseModel):
     """Model information from OpenRouter"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "anthropic/claude-3.5-sonnet",
+                "name": "Anthropic: Claude 3.5 Sonnet",
+                "provider": "anthropic",
+                "description": "Claude 3.5 Sonnet...",
+                "context_length": 200000,
+                "input_price": 3.0,
+                "output_price": 15.0,
+                "supports_tools": True,
+                "supports_reasoning": True,
+                "knowledge_cutoff": "2024-04-30",
+                "enabled": True
+            }
+        }
+    )
+
     id: str = Field(..., description="Model ID (e.g., 'anthropic/claude-3.5-sonnet')")
     name: str = Field(..., description="Model display name")
     provider: str = Field(..., description="Provider name (e.g., 'anthropic', 'openai')")
@@ -39,24 +57,6 @@ class ModelInfo(BaseModel):
     # Enable/disable
     enabled: bool = Field(True, description="Whether this model is enabled for use")
     
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "id": "anthropic/claude-3.5-sonnet",
-                "name": "Anthropic: Claude 3.5 Sonnet",
-                "provider": "anthropic",
-                "description": "Claude 3.5 Sonnet...",
-                "context_length": 200000,
-                "input_price": 3.0,
-                "output_price": 15.0,
-                "supports_tools": True,
-                "supports_reasoning": True,
-                "knowledge_cutoff": "2024-04-30",
-                "enabled": True
-            }
-        }
-
-
 class OpenRouterModels:
     """Manage OpenRouter models"""
     

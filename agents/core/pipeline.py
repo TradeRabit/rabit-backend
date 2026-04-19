@@ -1,6 +1,7 @@
 """Agent pipeline trace models and dispatch planning."""
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -250,6 +251,39 @@ def should_plan_chart_analysis(
     return keyword_match or indicator_bias
 
 
+def should_enable_chart_write(
+    intent_context: AgentIntentContext,
+    user_input: str,
+) -> bool:
+    """Return whether the chart node should switch into write mode."""
+    if intent_context.should_clarify:
+        return False
+
+    if intent_context.confidence not in {"high", "medium"}:
+        return False
+
+    if "chart" not in set(intent_context.preferred_tool_groups or []):
+        return False
+
+    text = (user_input or "").lower()
+    explicit_write_verbs = bool(
+        re.search(r"\b(draw|mark|plot|annotate|clear|wipe|reset)\b", text)
+    )
+    chart_write_targets = bool(
+        re.search(
+            r"\b(horizontal line|trend line|support|resistance|entry|stop(?: loss)?|target|"
+            r"invalidation|validation|drawing|drawings|level)\b",
+            text,
+        )
+    )
+    clear_drawings_intent = bool(
+        re.search(r"\b(clear|wipe|reset|remove)\b", text)
+        and re.search(r"\b(drawings?|lines?|annotations?|chart)\b", text)
+    )
+
+    return clear_drawings_intent or (explicit_write_verbs and chart_write_targets)
+
+
 def resolve_selected_next_agent(
     intent_context: AgentIntentContext,
     user_input: str,
@@ -358,29 +392,60 @@ def build_pipeline_nodes(
             )
         )
 
-    if should_plan_chart_analysis(intent_context, user_input):
+    write_mode = should_enable_chart_write(intent_context, user_input)
+    if should_plan_chart_analysis(intent_context, user_input) or write_mode:
         nodes.append(
             AgentPipelineNodePlan(
                 name=PIPELINE_NODE_CHART_ANALYSIS,
-                summary="Inspect the active TradingView workspace before the main answer.",
+                summary=(
+                    "Apply controlled TradingView chart mutations before the main answer."
+                    if write_mode
+                    else "Inspect the active TradingView workspace before the main answer."
+                ),
                 instruction=(
-                    "Act as a chart-analysis specialist step. Focus on chart state, symbol/timeframe alignment, "
+                    "Act as a chart-write specialist step. Focus on controlled chart mutation only: "
+                    "align symbol and timeframe when allowed, apply explicit drawing requests, respect locked "
+                    "asset scope, avoid alerts, and do not improvise extra chart changes beyond the user request."
+                    if write_mode
+                    else "Act as a chart-analysis specialist step. Focus on chart state, symbol/timeframe alignment, "
                     "temporary indicator setup, and indicator-value observation. Respect locked asset scope, "
                     "avoid chart-writing behavior, and gather only evidence that improves the final answer."
                 ),
                 config={
+                    "chart_mode": "write" if write_mode else "analysis",
                     "allow_symbol_change_when_global": True,
-                    "allow_indicator_add": True,
-                    "allow_chart_write": False,
+                    "allow_indicator_add": not write_mode,
+                    "allow_chart_write": write_mode,
                     "max_steps": 4,
-                    "llm_blocked_tool_names": [
-                        "tv_draw_line",
-                        "tv_draw_horizontal_line",
-                        "tv_clear_drawings",
-                        "tv_create_alert",
-                        "tv_list_alerts",
-                        "tv_delete_alert",
-                    ],
+                    "capture_screenshot_after_write": write_mode,
+                    "llm_allowed_tool_names": (
+                        [
+                            "show_hint",
+                            "show_plan",
+                            "show_thinking_summary",
+                        ]
+                        if write_mode
+                        else []
+                    ),
+                    "llm_blocked_tool_names": (
+                        [
+                            "tv_create_alert",
+                            "tv_list_alerts",
+                            "tv_delete_alert",
+                            "tv_add_indicator",
+                            "tv_remove_indicator",
+                            "tv_set_indicator_inputs",
+                        ]
+                        if write_mode
+                        else [
+                            "tv_draw_line",
+                            "tv_draw_horizontal_line",
+                            "tv_clear_drawings",
+                            "tv_create_alert",
+                            "tv_list_alerts",
+                            "tv_delete_alert",
+                        ]
+                    ),
                 },
             )
         )
