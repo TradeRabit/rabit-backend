@@ -8,7 +8,7 @@ from typing import Optional, List
 import logging
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from agents.core import TradingAgent
 from agents.auth import (
@@ -46,6 +46,7 @@ from agents.uploads import UploadValidationError, get_upload_manager
 from config.settings import settings
 from ws.services import get_market_service
 from ws.handlers import MarketDataHandler
+from ws.news import get_news_monitor
 from ws.binance import BinanceHistoryDownloader
 from ws.utils.categories import get_category_stats, get_primary_category, normalize_category
 from api.models import (
@@ -53,6 +54,8 @@ from api.models import (
     AssetCategoryListResponse,
     AssetListResponse,
     AssetListItem,
+    AssetNewsItem,
+    AssetNewsResponse,
     AssetDetailResponse,
     AssetSummaryResponse,
     RelatedAssetsResponse,
@@ -108,6 +111,43 @@ def get_agent(scope_id: Optional[str] = None, user_id: Optional[str] = None) -> 
         register_trading_tools()
         _agent_tools_registered = True
     return TradingAgent(scope_id=scope_id, user_id=user_id)
+
+
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO datetime string into an aware UTC datetime when possible."""
+    if not value:
+        return None
+    try:
+        normalized = str(value).strip().replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _enrich_news_item_timing(item: dict, fallback_detected_at: str) -> dict:
+    """Attach consistent freshness helpers to one news item."""
+    detected_at = item.get("detected_at") or fallback_detected_at
+    detected_dt = _parse_iso_datetime(detected_at)
+    now_dt = datetime.now(timezone.utc)
+
+    freshness_seconds: Optional[int] = None
+    if detected_dt is not None:
+        freshness_seconds = max(0, int((now_dt - detected_dt).total_seconds()))
+
+    is_new = (
+        freshness_seconds is not None
+        and freshness_seconds <= settings.NEWS_IS_NEW_WINDOW_SECONDS
+    )
+
+    return {
+        **item,
+        "detected_at": detected_at,
+        "freshness_seconds": freshness_seconds,
+        "is_new": is_new,
+    }
 
 
 def _raise_mem0_http_error(exc: Exception) -> None:
@@ -195,6 +235,18 @@ def _serialize_agent_intent(agent) -> Optional[dict]:
         return intent.model_dump()
     if isinstance(intent, dict):
         return intent
+    return None
+
+
+def _serialize_agent_pipeline(agent) -> Optional[dict]:
+    """Safely serialize the agent's last pipeline trace for API responses."""
+    pipeline = getattr(agent, "last_pipeline_trace", None)
+    if pipeline is None:
+        return None
+    if hasattr(pipeline, "model_dump"):
+        return pipeline.model_dump()
+    if isinstance(pipeline, dict):
+        return pipeline
     return None
 
 
@@ -1143,6 +1195,49 @@ async def get_related_assets(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get(
+    "/news/assets/{symbol}",
+    response_model=AssetNewsResponse,
+    summary="Get latest news snapshot for one tracked asset",
+    description="Return a latest snapshot of asset-specific news using the existing news retrieval layer",
+    tags=["Assets"]
+)
+async def get_asset_news(
+    symbol: str,
+    limit: int = Query(5, description="Maximum number of asset news items to return"),
+):
+    """Return a snapshot of the latest news for one tracked asset symbol."""
+    from agents.tools.market.news_tools import get_news_client
+
+    normalized_symbol = symbol.upper()
+    response_timestamp = datetime.utcnow().isoformat()
+    client = get_news_client()
+    results = client.search_news_by_symbols([normalized_symbol], max_results=max(1, min(int(limit), 20)))
+    asset_news = results.get(normalized_symbol, [])
+    return AssetNewsResponse(
+        timestamp=response_timestamp,
+        symbol=normalized_symbol,
+        news=[
+            AssetNewsItem(
+                **_enrich_news_item_timing(
+                    {
+                        "title": item.get("title", ""),
+                        "url": item.get("url", ""),
+                        "snippet": item.get("snippet"),
+                        "date": item.get("date"),
+                        "source": item.get("source"),
+                        "symbol": normalized_symbol,
+                        "detected_at": item.get("detected_at", response_timestamp),
+                    },
+                    response_timestamp,
+                )
+            )
+            for item in asset_news
+        ],
+        total=len(asset_news),
+    )
+
+
 # ============================================================================
 # OHLC Data Endpoint
 # ============================================================================
@@ -1367,6 +1462,47 @@ async def _collect_trending_assets(limit: Optional[int] = 10) -> List[dict]:
     return ranked[:max_items]
 
 
+def _normalize_news_symbols(raw_symbols: Optional[str]) -> List[str]:
+    """Normalize a comma-separated symbol list for news routes."""
+    if not raw_symbols:
+        return []
+    return [
+        symbol.strip().upper()
+        for symbol in str(raw_symbols).split(",")
+        if symbol.strip()
+    ]
+
+
+def _filter_news_message(message: dict, symbols: List[str], tail: int) -> dict:
+    """Filter one internal news-monitor payload for the requested asset symbols."""
+    news_items = list(message.get("news") or [])
+    if symbols:
+        filtered = [
+            item
+            for item in news_items
+            if set(item.get("symbols") or []).intersection(symbols)
+        ]
+    else:
+        filtered = news_items
+
+    if tail > 0:
+        filtered = filtered[-tail:]
+
+    message_timestamp = message.get("timestamp") or datetime.utcnow().isoformat()
+    normalized_items = [
+        _enrich_news_item_timing(item, message_timestamp)
+        for item in filtered
+    ]
+
+    return {
+        **message,
+        "timestamp": message_timestamp,
+        "symbols": symbols,
+        "count": len(normalized_items),
+        "news": normalized_items,
+    }
+
+
 @router.websocket("/ws/prices")
 async def websocket_prices(websocket: WebSocket):
     """
@@ -1428,6 +1564,81 @@ async def websocket_prices(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket)
+
+
+@router.websocket("/ws/news")
+async def websocket_news(websocket: WebSocket):
+    """WebSocket endpoint for live news updates derived from the news retrieval layer."""
+    await websocket.accept()
+
+    symbols = _normalize_news_symbols(websocket.query_params.get("symbols"))
+    try:
+        tail = max(1, min(int(websocket.query_params.get("tail", "5")), 20))
+    except ValueError:
+        tail = 5
+
+    try:
+        poll_interval = max(30, int(websocket.query_params.get("poll_interval", "300")))
+    except ValueError:
+        poll_interval = 300
+
+    monitor = get_news_monitor()
+    monitor.ensure_symbols(symbols)
+    monitor.poll_interval = poll_interval
+
+    if not monitor.running:
+        await monitor.start()
+
+    queue = monitor.subscribe()
+    try:
+        snapshot = monitor.get_asset_news_snapshot(symbols=symbols, tail=tail)
+        snapshot_timestamp = datetime.utcnow().isoformat()
+        normalized_snapshot = {
+            symbol_key: [
+                _enrich_news_item_timing(item, snapshot_timestamp)
+                for item in items
+            ]
+            for symbol_key, items in snapshot.items()
+        }
+        await websocket.send_json(
+            {
+                "type": "news_snapshot",
+                "timestamp": snapshot_timestamp,
+                "symbols": symbols,
+                "tail": tail,
+                "news_by_symbol": normalized_snapshot,
+            }
+        )
+
+        while True:
+            queue_task = asyncio.create_task(queue.get())
+            client_task = asyncio.create_task(websocket.receive_text())
+            done, pending = await asyncio.wait(
+                {queue_task, client_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            for task in pending:
+                task.cancel()
+
+            completed = next(iter(done))
+            try:
+                payload = completed.result()
+            except WebSocketDisconnect:
+                break
+
+            if completed is client_task:
+                if str(payload).strip().lower() == "ping":
+                    await websocket.send_text("pong")
+                continue
+
+            await websocket.send_json(_filter_news_message(payload, symbols, tail))
+    except WebSocketDisconnect:
+        logger.info("News WebSocket client disconnected")
+    except Exception as exc:
+        logger.error(f"News WebSocket error: {exc}")
+    finally:
+        monitor.unsubscribe(queue)
 
 
 # ============================================================================
@@ -1651,6 +1862,7 @@ async def chat_with_agent(
             ),
             attachment_ids=request.attachment_ids,
             intent=_serialize_agent_intent(agent),
+            agent_pipeline=_serialize_agent_pipeline(agent),
             session_cost=_serialize_session_cost(
                 getattr(agent, "last_session_cost_summary", None)
             ),
@@ -1741,6 +1953,7 @@ async def stream_chat_with_agent(
                         ),
                         "attachment_ids": request.attachment_ids,
                         "intent": _serialize_agent_intent(agent),
+                        "agent_pipeline": _serialize_agent_pipeline(agent),
                         "session_cost": _serialize_session_cost(
                             getattr(agent, "last_session_cost_summary", None)
                         ),
@@ -1789,6 +2002,7 @@ async def stream_chat_with_agent(
                             )
                         ),
                         "intent": _serialize_agent_intent(agent),
+                        "agent_pipeline": _serialize_agent_pipeline(agent),
                         "session_cost": _serialize_session_cost(
                             getattr(agent, "last_session_cost_summary", None)
                         ),
@@ -1840,6 +2054,7 @@ async def stream_chat_with_agent(
                             )
                         ),
                         "intent": _serialize_agent_intent(agent),
+                        "agent_pipeline": _serialize_agent_pipeline(agent),
                         "session_cost": _serialize_session_cost(
                             getattr(agent, "last_session_cost_summary", None)
                         ),

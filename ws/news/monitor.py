@@ -1,13 +1,17 @@
 """
 News WebSocket Monitor
-Real-time news monitoring with AI review and sentiment analysis
+Real-time news monitoring with AI review and sentiment analysis.
 """
 
 import asyncio
 import logging
+import re
+from collections import deque
 from typing import Set, Dict, Optional, List, Callable
 from datetime import datetime
-from agents.tools.news_tools import get_news_client
+
+from agents.tools.market.news_tools import get_news_client
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,15 @@ class NewsMonitor:
         self.seen_urls: Set[str] = set()
         self.subscribers: Set[asyncio.Queue] = set()
         self.news_client = get_news_client()
+        self.tracked_symbols = {
+            str(symbol).strip().upper()
+            for symbol in settings.TRADING_ASSETS
+            if str(symbol).strip()
+        }
+        self.general_history = deque(maxlen=200)
+        self.asset_history: Dict[str, deque] = {
+            symbol: deque(maxlen=50) for symbol in self.tracked_symbols
+        }
         
         # Statistics
         self.stats = {
@@ -88,6 +101,27 @@ class NewsMonitor:
         self.subscribers.add(queue)
         logger.info(f"New subscriber added (total: {len(self.subscribers)})")
         return queue
+
+    def ensure_symbols(self, symbols: List[str]) -> None:
+        """Ensure requested asset symbols are covered by the polling keyword set."""
+        for symbol in symbols:
+            normalized = str(symbol).strip().upper()
+            if not normalized:
+                continue
+            if normalized not in self.tracked_symbols:
+                self.tracked_symbols.add(normalized)
+                self.asset_history[normalized] = deque(maxlen=50)
+
+            covered = any(
+                normalized in {
+                    token.strip().upper()
+                    for token in re.split(r"[|,]", keyword)
+                    if token.strip()
+                }
+                for keyword in self.keywords
+            )
+            if not covered:
+                self.add_keyword(normalized)
     
     def unsubscribe(self, queue: asyncio.Queue):
         """Unsubscribe from news updates"""
@@ -145,11 +179,13 @@ class NewsMonitor:
                     self.seen_urls.add(url)
                     
                     # Add to new articles
-                    new_articles.append({
+                    normalized_article = {
                         **article,
                         "detected_at": datetime.now().isoformat(),
-                        "keyword": keyword
-                    })
+                        "keyword": keyword,
+                    }
+                    normalized_article["symbols"] = self._extract_symbols(normalized_article)
+                    new_articles.append(normalized_article)
             
             # Limit seen URLs to prevent memory growth
             if len(self.seen_urls) > 1000:
@@ -160,6 +196,86 @@ class NewsMonitor:
             logger.error(f"Check new news error: {e}")
         
         return new_articles
+
+    def _extract_symbols(self, article: Dict) -> List[str]:
+        """Infer tracked symbols mentioned in one article."""
+        discovered: Set[str] = set()
+
+        raw_symbols = article.get("symbols")
+        if isinstance(raw_symbols, list):
+            for symbol in raw_symbols:
+                normalized = str(symbol).strip().upper()
+                if normalized:
+                    discovered.add(normalized)
+        elif isinstance(raw_symbols, str):
+            normalized = raw_symbols.strip().upper()
+            if normalized:
+                discovered.add(normalized)
+
+        keyword = str(article.get("keyword", "")).strip()
+        if keyword:
+            for token in re.split(r"[|,]", keyword):
+                normalized = token.strip().upper()
+                if normalized in self.tracked_symbols:
+                    discovered.add(normalized)
+
+        matched_keywords = article.get("matched_keywords") or []
+        if isinstance(matched_keywords, list):
+            for token in matched_keywords:
+                normalized = str(token).strip().upper()
+                if normalized in self.tracked_symbols:
+                    discovered.add(normalized)
+
+        haystack = f"{article.get('title', '')} {article.get('snippet', '')}".upper()
+        for symbol in self.tracked_symbols:
+            if re.search(rf"\b{re.escape(symbol)}\b", haystack):
+                discovered.add(symbol)
+
+        return sorted(discovered)
+
+    def _store_history(self, news_list: List[Dict]) -> None:
+        """Store general and per-asset headline history."""
+        for article in news_list:
+            compact = {
+                "title": article.get("title", ""),
+                "url": article.get("url", ""),
+                "snippet": article.get("snippet", ""),
+                "date": article.get("date", ""),
+                "source": article.get("source", "Unknown"),
+                "detected_at": article.get("detected_at", datetime.now().isoformat()),
+                "symbols": list(article.get("symbols") or []),
+                "review": article.get("review"),
+            }
+            self.general_history.append(compact)
+            for symbol in compact["symbols"]:
+                if symbol not in self.asset_history:
+                    self.asset_history[symbol] = deque(maxlen=50)
+                self.asset_history[symbol].append(compact)
+
+    def get_asset_news_snapshot(self, symbols: Optional[List[str]] = None, tail: int = 5) -> Dict[str, List[Dict]]:
+        """Return the latest stored news items grouped by asset symbol."""
+        normalized_symbols = [
+            str(symbol).strip().upper()
+            for symbol in (symbols or [])
+            if str(symbol).strip()
+        ]
+        if not normalized_symbols:
+            normalized_symbols = sorted(self.tracked_symbols)[:10]
+
+        result: Dict[str, List[Dict]] = {}
+        for symbol in normalized_symbols:
+            items = list(self.asset_history.get(symbol, deque()))
+            result[symbol] = items[-max(0, int(tail or 0)) :]
+        return result
+
+    def get_tail_titles(self, symbol: Optional[str] = None, limit: int = 5) -> List[str]:
+        """Return the latest headline titles for one asset or the global stream."""
+        normalized = str(symbol).strip().upper() if symbol else None
+        if normalized:
+            items = list(self.asset_history.get(normalized, deque()))
+        else:
+            items = list(self.general_history)
+        return [item.get("title", "") for item in items[-max(0, int(limit or 0)) :] if item.get("title")]
     
     async def _review_news(self, news_list: List[Dict]) -> List[Dict]:
         """
@@ -266,6 +382,7 @@ Respond in JSON format:
     async def _broadcast(self, news: List[Dict]):
         """Broadcast news to all subscribers"""
         if not self.subscribers:
+            self._store_history(news)
             return
         
         # Separate by sentiment for prioritization
@@ -283,6 +400,7 @@ Respond in JSON format:
             "news": news,
             "stats": self.stats
         }
+        self._store_history(news)
         
         # Send to all subscribers
         dead_queues = []

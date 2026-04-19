@@ -91,6 +91,9 @@ class Settings:
 
     # Tool feature gates
     WEB_SEARCH_ENABLED = os.getenv("WEB_SEARCH_ENABLED", "true").lower() == "true"
+    NEWS_IS_NEW_WINDOW_SECONDS = int(
+        os.getenv("NEWS_IS_NEW_WINDOW_SECONDS", "86400")
+    )
 
     # Exchange connection storage
     EXCHANGE_CONNECTIONS_DB_PATH = os.getenv(

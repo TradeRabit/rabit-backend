@@ -23,6 +23,15 @@ class DummyAgent:
             "preferred_tool_groups": ["market", "chart", "ui"],
             "routing_reason": "User asks for chart review",
         }
+        self.last_pipeline_trace = {
+            "entry_agent": "TradingAgent",
+            "selected_next_agent": "market_specialist",
+            "architecture_mode": "router_ready_single_runtime",
+            "routing_intent": "market_analysis",
+            "routing_confidence": "high",
+            "final_status": "completed",
+            "stages": [],
+        }
 
     async def process_trading_query(
         self,
@@ -123,6 +132,7 @@ def test_agent_upload_chat_and_delete(monkeypatch, tmp_path: Path):
     assert chat_response.json()["drift_execution"]["enabled"] is False
     assert chat_response.json()["drift_execution"]["exchange"] == "drift"
     assert chat_response.json()["intent"]["intent"] == "market_analysis"
+    assert chat_response.json()["agent_pipeline"]["selected_next_agent"] == "market_specialist"
     assert agent.calls[0]["message"] == "Review this chart"
     assert agent.calls[0]["conversation_style"] == "formal"
     assert agent.calls[0]["trading_style"] == "smart_money"

@@ -2,7 +2,7 @@
 import base64
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from anthropic import Anthropic, AsyncAnthropic
 
@@ -24,6 +24,11 @@ from agents.drift_execution import (
 )
 from agents.memory import ConversationMemory, Mem0Error, Message, get_mem0_client
 from agents.market_context import get_market_context_guidance, normalize_market_context
+from agents.core.graph_executor import (
+    AgentNodeExecutionContext,
+    build_default_graph_executor,
+)
+from agents.core.pipeline import AgentPipelineTrace, build_pipeline_trace
 from agents.tools import ToolResult, tool_registry
 from agents.tools.core.runtime_context import (
     reset_current_backpack_execution,
@@ -47,6 +52,10 @@ from config.settings import settings
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class AgentExecutionError(RuntimeError):
+    """Raised when agent execution fails after converting to a safe user-facing message."""
 
 
 class BaseAgent:
@@ -109,6 +118,9 @@ class BaseAgent:
         self.last_backpack_execution = normalize_backpack_execution(None)
         self.last_drift_execution = normalize_drift_execution(None)
         self.last_session_cost_summary: Optional[Dict[str, Any]] = None
+        self.last_pipeline_trace: Optional[AgentPipelineTrace] = None
+        self.last_safe_error_message: Optional[str] = None
+        self.graph_executor = build_default_graph_executor()
 
         logger.info(f"Agent scope: {scope_id or 'global'}")
 
@@ -144,6 +156,247 @@ class BaseAgent:
             self.memory.clear_global()
         logger.info(f"Cleared history for agent: {self.name}")
 
+    async def _prepare_turn(
+        self,
+        *,
+        user_input: str,
+        attachments: List[AgentAttachment],
+        conversation_style: str,
+        trading_style: str,
+        market_context: Optional[Dict[str, Any]],
+        backpack_execution: Optional[Dict[str, Any]],
+        drift_execution: Optional[Dict[str, Any]],
+    ) -> Tuple[str, List[Dict[str, Any]], AgentIntentContext, str]:
+        """Normalize inputs, route intent, and build a pipeline-ready prompt."""
+        conversation_style = normalize_conversation_style(conversation_style)
+        trading_style = normalize_trading_style(trading_style)
+        market_context = normalize_market_context(market_context)
+        backpack_execution = normalize_backpack_execution(backpack_execution)
+        drift_execution = normalize_drift_execution(drift_execution)
+        self.last_conversation_style = conversation_style
+        self.last_trading_style = trading_style
+        self.last_market_context = market_context
+        self.last_backpack_execution = backpack_execution
+        self.last_drift_execution = drift_execution
+        self.last_safe_error_message = None
+
+        user_summary = self._build_memory_user_text(user_input, attachments)
+        history = self.get_conversation_history()
+        if self.compressor.needs_compression(history):
+            logger.info(f"Auto-compressing conversation for agent: {self.name}")
+            history = await self.compressor.compress(history)
+
+        intent_context = await self._route_intent(user_input, history, market_context)
+        self.last_intent = intent_context
+        self.last_pipeline_trace = build_pipeline_trace(
+            entry_agent=self.name,
+            intent_context=intent_context,
+            user_input=user_input,
+        )
+
+        effective_system_prompt = await self._build_effective_system_prompt(
+            user_input,
+            intent_context,
+            conversation_style,
+            trading_style,
+            market_context,
+            backpack_execution,
+            drift_execution,
+        )
+
+        messages = list(history)
+        messages.append({
+            "role": "user",
+            "content": self._build_user_content(user_input, attachments),
+        })
+        return user_summary, messages, intent_context, effective_system_prompt
+
+    async def _execute_tool_for_node(self, tool_name: str, arguments: Dict[str, Any]) -> ToolResult:
+        """Execute one tool on behalf of a pipeline node with shared failure tracking."""
+        result = await tool_registry.execute(tool_name, arguments)
+        if not result.success and self.last_pipeline_trace is not None:
+            self.last_pipeline_trace.record_tool_failure(
+                tool_name,
+                result.error or "Unknown tool failure",
+            )
+        return result
+
+    async def _run_pipeline_nodes(
+        self,
+        *,
+        user_input: str,
+        messages: List[Dict[str, Any]],
+        system_prompt: str,
+        intent_context: AgentIntentContext,
+        event_emitter=None,
+    ) -> Tuple[List[Dict[str, Any]], str]:
+        """Run composable pre-response pipeline nodes before the main runtime answer."""
+        pipeline = self.last_pipeline_trace
+        if pipeline is None or not pipeline.pipeline_nodes:
+            return messages, system_prompt
+
+        self._update_pipeline_stage(
+            "graph_execution",
+            status="running",
+            summary="Executing planned pre-response pipeline nodes.",
+            metadata={"pipeline_nodes": [node.name for node in pipeline.pipeline_nodes]},
+        )
+
+        user_token = set_current_user_id(self.user_id)
+        backpack_execution_token = set_current_backpack_execution(self.last_backpack_execution)
+        drift_execution_token = set_current_drift_execution(self.last_drift_execution)
+        market_context_token = set_current_market_context(self.last_market_context)
+        emitter_token = set_current_event_emitter(event_emitter) if event_emitter else None
+
+        try:
+            context = AgentNodeExecutionContext(
+                agent=self,
+                user_input=user_input,
+                messages=list(messages),
+                system_prompt=system_prompt,
+                intent_context=intent_context,
+                market_context=self.last_market_context,
+                event_emitter=event_emitter,
+                call_tool=self._execute_tool_for_node,
+            )
+            context = await self.graph_executor.execute(
+                plans=pipeline.pipeline_nodes,
+                context=context,
+            )
+        finally:
+            if emitter_token is not None:
+                reset_current_event_emitter(emitter_token)
+            reset_current_market_context(market_context_token)
+            reset_current_drift_execution(drift_execution_token)
+            reset_current_backpack_execution(backpack_execution_token)
+            reset_current_user_id(user_token)
+
+        degraded_nodes = [node.name for node in pipeline.pipeline_nodes if node.status in {"degraded", "failed"}]
+        self._update_pipeline_stage(
+            "graph_execution",
+            status="completed" if not degraded_nodes else "degraded",
+            summary=(
+                "Completed planned pre-response pipeline nodes."
+                if not degraded_nodes
+                else "Completed planned pipeline nodes with degraded specialist context."
+            ),
+            metadata={
+                "executed_nodes": [node.name for node in pipeline.pipeline_nodes],
+                "degraded_nodes": degraded_nodes,
+                "node_observations": context.observations,
+            },
+        )
+        pipeline.next_agent_status = pipeline.resolve_next_agent_status()
+        if degraded_nodes and self.last_pipeline_trace is not None:
+            self.last_pipeline_trace.mark_fallback(
+                "pipeline_node_degraded",
+                f"Pipeline nodes degraded: {', '.join(degraded_nodes)}",
+            )
+
+        return context.messages, context.system_prompt
+
+    def _update_pipeline_stage(
+        self,
+        name: str,
+        *,
+        status: str,
+        summary: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Update the stored pipeline trace when present."""
+        if self.last_pipeline_trace is None:
+            return
+        self.last_pipeline_trace.update_stage(
+            name,
+            status=status,
+            summary=summary,
+            metadata=metadata,
+        )
+
+    def _get_effective_allowed_tool_names(
+        self,
+        intent_context: AgentIntentContext,
+    ) -> Optional[set[str]]:
+        """Resolve the tool surface after applying pipeline-node restrictions."""
+        allowed_names = intent_context.allowed_tool_names
+        pipeline = self.last_pipeline_trace
+        if allowed_names is None:
+            effective_names: Optional[set[str]] = None
+        else:
+            effective_names = set(allowed_names)
+
+        if pipeline is None:
+            return effective_names
+
+        blocked_names: set[str] = set()
+        allow_lists: list[set[str]] = []
+        for node in pipeline.pipeline_nodes:
+            blocked_names.update(node.config.get("llm_blocked_tool_names", []))
+            explicit_allowed_names = node.config.get("llm_allowed_tool_names", [])
+            if explicit_allowed_names:
+                allow_lists.append(set(explicit_allowed_names))
+
+        if allow_lists:
+            allowed_by_nodes = set().union(*allow_lists)
+            if effective_names is None:
+                effective_names = allowed_by_nodes
+            else:
+                effective_names.intersection_update(allowed_by_nodes)
+
+        if effective_names is None:
+            return None
+
+        if blocked_names:
+            effective_names.difference_update(blocked_names)
+
+        return effective_names
+
+    def _finalize_pipeline(self, status: str) -> None:
+        """Set final pipeline status when a trace exists."""
+        if self.last_pipeline_trace is None:
+            return
+        self.last_pipeline_trace.finalize(status)
+
+    def _build_user_safe_error_response(
+        self,
+        exc: Exception,
+        intent_context: Optional[AgentIntentContext] = None,
+    ) -> str:
+        """Build a user-safe fallback message instead of leaking raw backend errors."""
+        intent_context = intent_context or AgentIntentContext.fallback()
+        fallback_by_intent = {
+            "broker_execution": (
+                "I could not safely continue the execution workflow right now. "
+                "I can still help you review execution readiness, open orders, or the trade setup before you retry."
+            ),
+            "portfolio_review": (
+                "I hit a backend issue while reviewing the portfolio data. "
+                "I can still help you think through the portfolio at a high level or you can retry once the data path is healthy."
+            ),
+            "position_management": (
+                "I could not complete the position-management workflow right now. "
+                "I can still help you think through stop logic, invalidation, or next-step scenarios."
+            ),
+            "memory_lookup": (
+                "I could not access the memory layer right now. "
+                "If you want, I can still answer from the current conversation context only."
+            ),
+        }
+        message = fallback_by_intent.get(
+            intent_context.intent,
+            (
+                "I hit a backend issue while working through that request. "
+                "I can still help with a safer high-level answer, or you can retry once the failing path is available."
+            ),
+        )
+        logger.warning(
+            "Returning safe agent fallback message for intent=%s error_type=%s error=%s",
+            intent_context.intent,
+            type(exc).__name__,
+            str(exc),
+        )
+        return message
+
     async def process(
         self,
         user_input: str,
@@ -169,41 +422,33 @@ class BaseAgent:
         Returns:
             Agent response
         """
-        attachments = attachments or []
-        conversation_style = normalize_conversation_style(conversation_style)
-        trading_style = normalize_trading_style(trading_style)
-        market_context = normalize_market_context(market_context)
-        backpack_execution = normalize_backpack_execution(backpack_execution)
-        drift_execution = normalize_drift_execution(drift_execution)
-        self.last_conversation_style = conversation_style
-        self.last_trading_style = trading_style
-        self.last_market_context = market_context
-        self.last_backpack_execution = backpack_execution
-        self.last_drift_execution = drift_execution
-        user_summary = self._build_memory_user_text(user_input, attachments)
-        history = self.get_conversation_history()
-        if self.compressor.needs_compression(history):
-            logger.info(f"Auto-compressing conversation for agent: {self.name}")
-            history = await self.compressor.compress(history)
-        intent_context = await self._route_intent(user_input, history, market_context)
-        self.last_intent = intent_context
-        effective_system_prompt = await self._build_effective_system_prompt(
-            user_input,
+        (
+            user_summary,
+            messages,
             intent_context,
-            conversation_style,
-            trading_style,
-            market_context,
-            backpack_execution,
-            drift_execution,
+            effective_system_prompt,
+        ) = await self._prepare_turn(
+            user_input=user_input,
+            attachments=attachments or [],
+            conversation_style=conversation_style,
+            trading_style=trading_style,
+            market_context=market_context,
+            backpack_execution=backpack_execution,
+            drift_execution=drift_execution,
         )
 
-        messages = list(history)
-        messages.append({
-            "role": "user",
-            "content": self._build_user_content(user_input, attachments),
-        })
-
         try:
+            messages, effective_system_prompt = await self._run_pipeline_nodes(
+                user_input=user_input,
+                messages=messages,
+                system_prompt=effective_system_prompt,
+                intent_context=intent_context,
+            )
+            self._update_pipeline_stage(
+                "execution",
+                status="running",
+                summary="Executing the request inside the current runtime agent.",
+            )
             if use_tools:
                 response_text = await self._process_with_tools(
                     messages,
@@ -221,13 +466,43 @@ class BaseAgent:
                 response_text = self._extract_response_text(response)
 
             self.last_session_cost_summary = self._get_session_cost_summary()
+            self._update_pipeline_stage(
+                "execution",
+                status="completed",
+                summary="Completed execution in the current runtime agent.",
+                metadata={"used_tools": bool(use_tools)},
+            )
+            self._update_pipeline_stage(
+                "completion",
+                status="completed",
+                summary="Final response assembled successfully.",
+            )
+            self._finalize_pipeline("completed")
             self.add_message("user", user_summary)
             self.add_message("assistant", response_text)
             return response_text
 
         except Exception as exc:
             logger.error(f"Error processing message: {str(exc)}")
-            error_msg = f"Error: {str(exc)}"
+            error_msg = self._build_user_safe_error_response(exc, intent_context)
+            self.last_safe_error_message = error_msg
+            self._update_pipeline_stage(
+                "execution",
+                status="failed",
+                summary="Execution failed and switched to a safe fallback response.",
+                metadata={"error_type": type(exc).__name__},
+            )
+            self._update_pipeline_stage(
+                "completion",
+                status="degraded",
+                summary="Returned a safe fallback response instead of a raw error.",
+            )
+            self._finalize_pipeline("degraded")
+            if self.last_pipeline_trace:
+                self.last_pipeline_trace.mark_fallback(
+                    "safe_error_response",
+                    f"{type(exc).__name__}: {exc}",
+                )
             self.add_message("user", user_summary)
             self.add_message("assistant", error_msg)
             return error_msg
@@ -259,41 +534,34 @@ class BaseAgent:
         Returns:
             Final agent response text
         """
-        attachments = attachments or []
-        conversation_style = normalize_conversation_style(conversation_style)
-        trading_style = normalize_trading_style(trading_style)
-        market_context = normalize_market_context(market_context)
-        backpack_execution = normalize_backpack_execution(backpack_execution)
-        drift_execution = normalize_drift_execution(drift_execution)
-        self.last_conversation_style = conversation_style
-        self.last_trading_style = trading_style
-        self.last_market_context = market_context
-        self.last_backpack_execution = backpack_execution
-        self.last_drift_execution = drift_execution
-        user_summary = self._build_memory_user_text(user_input, attachments)
-        history = self.get_conversation_history()
-        if self.compressor.needs_compression(history):
-            logger.info(f"Auto-compressing conversation for agent: {self.name}")
-            history = await self.compressor.compress(history)
-        intent_context = await self._route_intent(user_input, history, market_context)
-        self.last_intent = intent_context
-        effective_system_prompt = await self._build_effective_system_prompt(
-            user_input,
+        (
+            user_summary,
+            messages,
             intent_context,
-            conversation_style,
-            trading_style,
-            market_context,
-            backpack_execution,
-            drift_execution,
+            effective_system_prompt,
+        ) = await self._prepare_turn(
+            user_input=user_input,
+            attachments=attachments or [],
+            conversation_style=conversation_style,
+            trading_style=trading_style,
+            market_context=market_context,
+            backpack_execution=backpack_execution,
+            drift_execution=drift_execution,
         )
 
-        messages = list(history)
-        messages.append({
-            "role": "user",
-            "content": self._build_user_content(user_input, attachments),
-        })
-
         try:
+            messages, effective_system_prompt = await self._run_pipeline_nodes(
+                user_input=user_input,
+                messages=messages,
+                system_prompt=effective_system_prompt,
+                intent_context=intent_context,
+                event_emitter=event_emitter,
+            )
+            self._update_pipeline_stage(
+                "execution",
+                status="running",
+                summary="Streaming the request through the current runtime agent.",
+            )
             if use_tools:
                 response_text = await self._process_with_tools_stream(
                     messages,
@@ -310,15 +578,45 @@ class BaseAgent:
                 )
 
             self.last_session_cost_summary = self._get_session_cost_summary()
+            self._update_pipeline_stage(
+                "execution",
+                status="completed",
+                summary="Completed streaming execution in the current runtime agent.",
+                metadata={"used_tools": bool(use_tools)},
+            )
+            self._update_pipeline_stage(
+                "completion",
+                status="completed",
+                summary="Streaming finished successfully.",
+            )
+            self._finalize_pipeline("completed")
             self.add_message("user", user_summary)
             self.add_message("assistant", response_text)
             return response_text
         except Exception as exc:
             logger.error(f"Error processing streaming message: {str(exc)}")
-            error_msg = f"Error: {str(exc)}"
+            safe_error = self._build_user_safe_error_response(exc, intent_context)
+            self.last_safe_error_message = safe_error
+            self._update_pipeline_stage(
+                "execution",
+                status="failed",
+                summary="Streaming execution failed and switched to a safe fallback message.",
+                metadata={"error_type": type(exc).__name__},
+            )
+            self._update_pipeline_stage(
+                "completion",
+                status="failed",
+                summary="Streaming ended with a fallback-safe error state.",
+            )
+            self._finalize_pipeline("failed")
+            if self.last_pipeline_trace:
+                self.last_pipeline_trace.mark_fallback(
+                    "safe_stream_error",
+                    f"{type(exc).__name__}: {exc}",
+                )
             self.add_message("user", user_summary)
-            self.add_message("assistant", error_msg)
-            raise
+            self.add_message("assistant", safe_error)
+            raise AgentExecutionError(safe_error) from exc
 
     async def _process_with_tools(
         self,
@@ -337,7 +635,7 @@ class BaseAgent:
             Final response text
         """
         tools_schema = tool_registry.get_tools_schema(
-            allowed_names=intent_context.allowed_tool_names
+            allowed_names=self._get_effective_allowed_tool_names(intent_context)
         )
         user_token = set_current_user_id(self.user_id)
         backpack_execution_token = set_current_backpack_execution(self.last_backpack_execution)
@@ -356,6 +654,7 @@ class BaseAgent:
 
             if response.stop_reason == "tool_use":
                 tool_results = []
+                tool_failure_count = 0
 
                 for content_block in response.content:
                     if content_block.type != "tool_use":
@@ -368,6 +667,12 @@ class BaseAgent:
                     result = await tool_registry.execute(tool_name, tool_input)
 
                     if not result.success:
+                        tool_failure_count += 1
+                        if self.last_pipeline_trace is not None:
+                            self.last_pipeline_trace.record_tool_failure(
+                                tool_name,
+                                result.error or "Unknown tool failure",
+                            )
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": content_block.id,
@@ -377,7 +682,7 @@ class BaseAgent:
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": content_block.id,
-                            "content": str(result.data),
+                            "content": self._build_tool_result_content(tool_name, result.data),
                         })
 
                 messages.append({"role": "assistant", "content": response.content})
@@ -391,8 +696,24 @@ class BaseAgent:
                     tools=tools_schema,
                 )
                 self._record_openrouter_usage(final_response, "tool_followup")
+                self._update_pipeline_stage(
+                    "execution",
+                    status="completed" if tool_failure_count == 0 else "degraded",
+                    summary=(
+                        "Completed the tool loop and produced a follow-up response."
+                        if tool_failure_count == 0
+                        else "Completed the tool loop with some degraded tool results."
+                    ),
+                    metadata={"tool_failure_count": tool_failure_count},
+                )
                 return self._extract_response_text(final_response)
 
+            self._update_pipeline_stage(
+                "execution",
+                status="completed",
+                summary="Answered directly without needing tool calls.",
+                metadata={"tool_failure_count": 0},
+            )
             return self._extract_response_text(response)
         finally:
             reset_current_market_context(market_context_token)
@@ -419,7 +740,7 @@ class BaseAgent:
             Final response text
         """
         tools_schema = tool_registry.get_tools_schema(
-            allowed_names=intent_context.allowed_tool_names
+            allowed_names=self._get_effective_allowed_tool_names(intent_context)
         )
         user_token = set_current_user_id(self.user_id)
         backpack_execution_token = set_current_backpack_execution(self.last_backpack_execution)
@@ -440,6 +761,7 @@ class BaseAgent:
                     return response_text
 
                 tool_results = []
+                tool_failure_count = 0
                 messages.append({"role": "assistant", "content": final_message.content})
 
                 for content_block in final_message.content:
@@ -453,6 +775,12 @@ class BaseAgent:
                     result = await tool_registry.execute(tool_name, tool_input)
 
                     if not result.success:
+                        tool_failure_count += 1
+                        if self.last_pipeline_trace is not None:
+                            self.last_pipeline_trace.record_tool_failure(
+                                tool_name,
+                                result.error or "Unknown tool failure",
+                            )
                         await event_emitter(
                             "error",
                             {
@@ -472,9 +800,19 @@ class BaseAgent:
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": content_block.id,
-                            "content": str(result.data),
+                            "content": self._build_tool_result_content(tool_name, result.data),
                         })
 
+                self._update_pipeline_stage(
+                    "execution",
+                    status="running" if tool_failure_count == 0 else "degraded",
+                    summary=(
+                        "Streaming tool loop is continuing."
+                        if tool_failure_count == 0
+                        else "Streaming tool loop continued with degraded tool results."
+                    ),
+                    metadata={"tool_failure_count": tool_failure_count},
+                )
                 messages.append({"role": "user", "content": tool_results})
         finally:
             reset_current_event_emitter(emitter_token)
@@ -545,6 +883,42 @@ class BaseAgent:
         for attachment in attachments:
             content.append(self._attachment_to_content_block(attachment))
         return content
+
+    def _build_tool_result_content(self, tool_name: str, data: Any) -> Any:
+        """Format tool results for the model, including multimodal TradingView screenshots."""
+        if tool_name == "tv_capture_screenshot" and isinstance(data, dict):
+            summary_payload = {
+                key: value
+                for key, value in data.items()
+                if key != "agent_image"
+            }
+            summary_text = (
+                "TradingView screenshot captured successfully.\n"
+                f"{json.dumps(summary_payload, ensure_ascii=False)}"
+            )
+
+            agent_image = data.get("agent_image")
+            if isinstance(agent_image, dict):
+                media_type = str(agent_image.get("content_type") or "").strip()
+                encoded = str(agent_image.get("data_base64") or "").strip()
+                if media_type and encoded:
+                    return [
+                        {"type": "text", "text": summary_text},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": encoded,
+                            },
+                        },
+                    ]
+
+            return summary_text
+
+        if isinstance(data, (dict, list)):
+            return json.dumps(data, ensure_ascii=False)
+        return str(data)
 
     def _attachment_to_content_block(self, attachment: AgentAttachment) -> Dict[str, Any]:
         """Convert a local attachment into an Anthropic/OpenRouter content block."""
@@ -632,6 +1006,10 @@ class BaseAgent:
             f"- market_context: {json.dumps(normalized_market_context, ensure_ascii=False)}\n"
             f"- backpack_execution: {json.dumps(normalized_backpack_execution, ensure_ascii=False)}\n"
             f"- drift_execution: {json.dumps(normalized_drift_execution, ensure_ascii=False)}\n"
+            f"- next_agent_target: "
+            f"{getattr(self.last_pipeline_trace, 'selected_next_agent', 'general_specialist')}\n"
+            f"- architecture_mode: "
+            f"{getattr(self.last_pipeline_trace, 'architecture_mode', 'router_ready_single_runtime')}\n"
             f"- intent_guidance: {intent_context.system_guidance}\n"
             f"- goal_guidance: {intent_context.goal_guidance}\n"
             f"- analysis_guidance: {intent_context.analysis_guidance}\n"

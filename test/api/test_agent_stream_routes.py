@@ -20,6 +20,15 @@ class DummyStreamingAgent:
             "preferred_tool_groups": ["ui", "market"],
             "routing_reason": "User explicitly wants a plan",
         }
+        self.last_pipeline_trace = {
+            "entry_agent": "TradingAgent",
+            "selected_next_agent": "research_specialist",
+            "architecture_mode": "router_ready_single_runtime",
+            "routing_intent": "plan_or_strategy",
+            "routing_confidence": "high",
+            "final_status": "completed",
+            "stages": [],
+        }
 
     async def process_stream(
         self,
@@ -149,6 +158,7 @@ def test_agent_chat_stream_returns_sse_events(monkeypatch, tmp_path):
     assert '"backpack_execution": {"enabled": true, "exchange": "backpack"}' in body
     assert '"drift_execution": {"enabled": false, "exchange": "drift"}' in body
     assert '"intent": {"intent": "plan_or_strategy"' in body
+    assert '"agent_pipeline": {"entry_agent": "TradingAgent", "selected_next_agent": "research_specialist"' in body
     assert agent.calls[0]["message"] == "Stream this plan"
     assert agent.calls[0]["conversation_style"] == "learning"
     assert agent.calls[0]["trading_style"] == "risk_first"

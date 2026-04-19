@@ -282,6 +282,11 @@ def test_base_agent_injects_mem0_context_into_system_prompt(monkeypatch):
     assert "Drift live trade execution is enabled for this request." in call["system"]
     assert "response_language: english" in call["system"]
     assert "should_clarify: false" in call["system"]
+    assert agent.last_pipeline_trace is not None
+    assert agent.last_pipeline_trace.selected_next_agent == "market_specialist"
+    assert agent.last_pipeline_trace.routing_intent == "market_analysis"
+    assert "Pipeline node instruction (chart_analysis):" in call["system"]
+    assert "Pipeline node instruction (market_snapshot):" in call["system"]
 
 
 def test_base_agent_tracks_openrouter_session_costs(monkeypatch):
@@ -309,3 +314,32 @@ def test_base_agent_tracks_openrouter_session_costs(monkeypatch):
     assert dummy_costs.calls[0]["user_id"] == "wallet:user-1"
     assert agent.last_session_cost_summary is not None
     assert agent.last_session_cost_summary["scope_id"] == "chat-cost-1"
+
+
+def test_base_agent_formats_tradingview_screenshot_tool_result(monkeypatch):
+    monkeypatch.setattr("agents.core.base.Anthropic", DummyAnthropic)
+    monkeypatch.setattr("agents.core.base.AsyncAnthropic", DummyAsyncAnthropic)
+    monkeypatch.setattr("agents.core.base.get_mem0_client", lambda: DummyMem0Client())
+
+    agent = BaseAgent(name="tv-agent", system_prompt="You are helpful.")
+    content = agent._build_tool_result_content(
+        "tv_capture_screenshot",
+        {
+            "success": True,
+            "region": "chart",
+            "screenshot_url": "http://localhost:3001/mock-chart.png",
+            "agent_image_available": True,
+            "agent_image": {
+                "content_type": "image/png",
+                "data_base64": "aW1hZ2UtYnl0ZXM=",
+                "size_bytes": 11,
+            },
+        },
+    )
+
+    assert isinstance(content, list)
+    assert content[0]["type"] == "text"
+    assert "mock-chart.png" in content[0]["text"]
+    assert content[1]["type"] == "image"
+    assert content[1]["source"]["media_type"] == "image/png"
+    assert content[1]["source"]["data"] == "aW1hZ2UtYnl0ZXM="

@@ -218,11 +218,11 @@ INTENT_GUIDANCE: Dict[str, str] = {
     "position_management": "The user's primary intent is managing an existing position. Focus on stop logic, take-profit logic, invalidation, and position handling rather than fresh entries.",
     "portfolio_review": "The user's primary intent is reviewing total portfolio health. Focus on exposure, concentration, diversification, and portfolio-level risk rather than one trade only.",
     "market_scan": "The user's primary intent is hunting for opportunities across multiple assets. Focus on screening, ranking, and identifying promising setups rather than deep-diving one asset too early.",
-    "news_impact": "The user's primary intent is understanding how a specific event or headline could move the market. Focus on event-driven impact, scenarios, and reaction pathways.",
+    "news_impact": "The user's primary intent is understanding how a specific event or headline could move the market. Prefer dedicated news tools first, then use web search only when news-specific results are insufficient. Focus on event-driven impact, scenarios, and reaction pathways.",
     "position_sizing": "The user's primary intent is sizing a position. Focus on risk budget, sizing logic, and the relationship between stop distance and position size.",
     "broker_execution": "The user's primary intent is troubleshooting execution or order behavior. Focus on fills, slippage, order state, and operational trading issues.",
     "trade_review": "The user's primary intent is reviewing a recently completed trade. Focus on entry quality, exit quality, mistakes, timing, and lessons learned.",
-    "macro_context": "The user's primary intent is understanding the bigger macro environment. Focus on regime, economic backdrop, and how macro conditions influence strategy.",
+    "macro_context": "The user's primary intent is understanding the bigger macro environment. Prefer recent news and broader research context together. Focus on regime, economic backdrop, and how macro conditions influence strategy.",
     "regulatory_check": "The user's primary intent is checking legal, compliance, tax, or regulatory impact. Focus on rules, limits, and practical implications while staying cautious.",
     "preference_update": "The user wants to update how the agent behaves or what it remembers as a preference. Focus on stable preference changes and saving them cleanly.",
     "context_reset": "The user wants to reset conversation or working context. Focus on clearing or shifting context instead of continuing previous assumptions.",
@@ -230,9 +230,9 @@ INTENT_GUIDANCE: Dict[str, str] = {
     "memory_create": "The user wants a stable fact or preference remembered. Prefer memory tools and avoid unrelated research unless needed for clarification.",
     "memory_lookup": "The user wants previously saved memory recalled. Prefer memory lookup before broader research.",
     "memory_delete": "The user wants saved memory removed. Prefer memory deletion and use hints if the target is ambiguous.",
-    "research": "The user's primary intent is research. Prefer web search and news tools, then summarize findings clearly.",
+    "research": "The user's primary intent is research. Treat this as a combined web-search and news workflow: prefer dedicated news tools when the request is headline-, catalyst-, or symbol-sensitive, and use general web search for broader context.",
     "plan_or_strategy": "The user wants a strategy or step-by-step plan. Prefer showing a plan and use supporting tools only when helpful.",
-    "education": "The user's primary intent is learning. Prefer explanation, clear definitions, and teaching over action-oriented trading suggestions.",
+    "education": "The user's primary intent is learning. Prefer explanation, clear definitions, and teaching over action-oriented trading suggestions. Use research/news tools only when recent context materially improves the explanation.",
     "journal_debrief": "The user's primary intent is reviewing past decisions or performance. Focus on reflection, mistakes, process quality, and lessons learned.",
     "alert_setup": "The user's primary intent is setting or managing alerts. Prefer monitoring tools and clear trigger conditions.",
     "general_chat": "The user's request is broad or mixed. Use judgment and keep the tool usage focused on the most relevant path.",
@@ -575,6 +575,8 @@ Behavior rules for routing:
 - Set user_goal_type to describe the outcome the user wants, not just the topic they mention.
 - Infer the likely analysis_mode and indicator_preference when the user does not specify them directly.
 - Prefer agent inference before clarification. Only set need_indicator_confirmation to true when the indicator choice materially changes the answer and remains too ambiguous.
+- Treat the `research` tool group as a combined information-retrieval surface that includes both general web search and dedicated news tools.
+- For catalyst-, headline-, or symbol-sensitive requests, prefer dedicated news tools inside `research` before falling back to generic web search.
 
 Valid intents:
 - market_analysis
@@ -612,6 +614,8 @@ Valid preferred_tool_groups:
 - chart
 - monitoring
 - memory
+- portfolio
+- execution
 - ui
 
 Valid user_goal_type values:

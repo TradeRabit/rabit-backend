@@ -237,6 +237,12 @@ class AgentMarketStateContext(BaseModel):
     summary: Optional[str] = None
 
 
+class AgentNewsContext(BaseModel):
+    """Optional news-headline hints supplied by the frontend."""
+
+    tail_titles: List[str] = Field(default_factory=list)
+
+
 class AgentMarketContext(BaseModel):
     """Optional asset scope and market-state context supplied by the frontend."""
 
@@ -249,6 +255,30 @@ class AgentMarketContext(BaseModel):
     source_screen: Optional[str] = None
     watchlist_symbols: List[str] = Field(default_factory=list)
     market_state: AgentMarketStateContext = Field(default_factory=AgentMarketStateContext)
+    news_context: AgentNewsContext = Field(default_factory=AgentNewsContext)
+
+
+class AssetNewsItem(BaseModel):
+    """One news item for a tracked asset."""
+
+    title: str
+    url: str
+    snippet: Optional[str] = None
+    date: Optional[str] = None
+    source: Optional[str] = None
+    symbol: str
+    detected_at: Optional[str] = None
+    freshness_seconds: Optional[int] = None
+    is_new: Optional[bool] = None
+
+
+class AssetNewsResponse(BaseModel):
+    """Response for GET /api/news/assets/{symbol}."""
+
+    timestamp: str
+    symbol: str
+    news: List[AssetNewsItem] = Field(default_factory=list)
+    total: int
 
 
 class AgentBackpackExecutionContext(BaseModel):
@@ -426,6 +456,7 @@ class AgentChatResponse(BaseModel):
     drift_execution: Optional[AgentDriftExecutionContext] = None
     attachment_ids: List[str] = Field(default_factory=list)
     intent: Optional[Dict[str, Any]] = None
+    agent_pipeline: Optional[Dict[str, Any]] = None
     session_cost: Optional[OpenRouterSessionCostResponse] = None
 
 

@@ -46,6 +46,8 @@ def normalize_market_context(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
     market_state_raw = payload.get("market_state", {})
     market_state_raw = market_state_raw if isinstance(market_state_raw, dict) else {}
+    news_context_raw = payload.get("news_context", {})
+    news_context_raw = news_context_raw if isinstance(news_context_raw, dict) else {}
 
     trend_bias = str(market_state_raw.get("trend_bias", "unknown")).strip().lower()
     if trend_bias not in VALID_TREND_BIAS:
@@ -83,6 +85,9 @@ def normalize_market_context(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             "momentum_state": momentum_state,
             "summary": _normalize_string(market_state_raw.get("summary")),
         },
+        "news_context": {
+            "tail_titles": _normalize_string_list(news_context_raw.get("tail_titles"))[:5],
+        },
     }
 
 
@@ -98,6 +103,7 @@ def get_market_context_guidance(context: Optional[Dict[str, Any]]) -> str:
     exchange = normalized.get("exchange")
     watchlist_symbols = normalized.get("watchlist_symbols") or []
     market_state = normalized.get("market_state", {})
+    news_context = normalized.get("news_context", {})
 
     if scope_mode == "locked_asset":
         label = symbol or asset_name or "the locked asset"
@@ -139,5 +145,10 @@ def get_market_context_guidance(context: Optional[Dict[str, Any]]) -> str:
         lines.append("Current market-state context: " + ", ".join(state_parts) + ".")
     if summary:
         lines.append(f"Market-state summary: {summary}")
+
+    tail_titles = news_context.get("tail_titles") if isinstance(news_context, dict) else []
+    if tail_titles:
+        joined = "; ".join(tail_titles[:5])
+        lines.append(f"Recent relevant headlines: {joined}")
 
     return " ".join(lines).strip()

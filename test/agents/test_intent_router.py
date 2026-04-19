@@ -183,6 +183,38 @@ def test_parse_intent_response_supports_combination_only_patterns():
     assert "show_hint" in education_context.allowed_tool_names
 
 
+def test_news_impact_context_includes_dedicated_news_tools():
+    context = parse_intent_response(
+        """
+        {
+          "intent": "news_impact",
+          "user_goal_type": "analyze",
+          "goal_summary": "Assess whether recent BTC ETF headlines affect price reaction",
+          "analysis_mode": "news",
+          "analysis_scope": "full_setup",
+          "indicator_preference": "auto",
+          "need_indicator_confirmation": false,
+          "inferred_indicator_hint": "",
+          "confidence": "high",
+          "preferred_tool_groups": ["research", "market", "ui"],
+          "routing_reason": "The user wants news-driven market impact analysis",
+          "response_language": "english",
+          "should_clarify": false,
+          "clarification_reason": "",
+          "suggested_hint_title": "",
+          "suggested_hint_options": []
+        }
+        """
+    )
+
+    assert context.intent == "news_impact"
+    assert "get_latest_news" in context.allowed_tool_names
+    assert "search_news_by_keywords" in context.allowed_tool_names
+    assert "get_trending_news" in context.allowed_tool_names
+    assert "search_news_by_symbols" in context.allowed_tool_names
+    assert "web_search" in context.allowed_tool_names
+
+
 def test_build_intent_prompt_documents_combination_only_patterns():
     prompt = build_intent_prompt(
         user_input="Is BTC or ETH better right now?",
@@ -194,6 +226,9 @@ def test_build_intent_prompt_documents_combination_only_patterns():
     assert "second-opinion requests should usually map to market_analysis" in prompt
     assert "liquidity-check requests should usually map to market_analysis" in prompt
     assert 'knowledge-gap or "what should I learn next" requests should usually map to education' in prompt
+    assert "combined information-retrieval surface that includes both general web search and dedicated news tools" in prompt
+    assert "- portfolio" in prompt
+    assert "- execution" in prompt
 
 
 def test_tool_registry_can_filter_schema_by_allowed_names():
