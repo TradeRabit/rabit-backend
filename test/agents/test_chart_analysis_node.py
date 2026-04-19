@@ -2,8 +2,8 @@ import asyncio
 from types import SimpleNamespace
 
 from agents.core.graph_executor import AgentNodeExecutionContext
-from agents.core.pipeline import AgentPipelineNodePlan
-from agents.intent_router import AgentIntentContext
+from agents.pipeline.pipeline import AgentPipelineNodePlan
+from agents.pipeline.intent_router import AgentIntentContext
 from agents.nodes.chart_analysis import run_chart_analysis_node
 
 
@@ -140,6 +140,7 @@ def test_chart_write_mode_draws_levels_and_captures_screenshot():
         "indicators": [],
     }
     calls = []
+    persisted_artifacts = []
 
     async def call_tool(name, arguments):
         calls.append((name, arguments))
@@ -159,6 +160,15 @@ def test_chart_write_mode_draws_levels_and_captures_screenshot():
             return _success({"data": {"screenshot_url": "http://localhost/screenshot.png"}})
         raise AssertionError(f"Unexpected tool call: {name}")
 
+    def persist_artifact(**kwargs):
+        artifact = {
+            "artifact_id": "artifact-1",
+            "scope_id": "scope-1",
+            **kwargs,
+        }
+        persisted_artifacts.append(artifact)
+        return artifact
+
     context = AgentNodeExecutionContext(
         agent=object(),
         user_input="Clear drawings and mark support at 65000 plus resistance at 68000 on ETH 4h",
@@ -171,6 +181,7 @@ def test_chart_write_mode_draws_levels_and_captures_screenshot():
         ),
         market_context={"scope_mode": "global", "symbol": "BTC", "timeframe": "60"},
         call_tool=call_tool,
+        persist_artifact=persist_artifact,
     )
     plan = AgentPipelineNodePlan(
         name="chart_analysis",
@@ -194,6 +205,8 @@ def test_chart_write_mode_draws_levels_and_captures_screenshot():
     assert "tv_capture_screenshot" in tool_names
     assert "tv_add_indicator" not in tool_names
     assert result.metadata["applied_actions"][0]["action"] == "clear_drawings"
+    assert result.metadata["artifacts"][0]["artifact_id"] == "artifact-1"
+    assert persisted_artifacts[0]["kind"] == "chart_write_screenshot"
     assert "Internal chart-write node observations" in result.system_prompt_addition
 
 

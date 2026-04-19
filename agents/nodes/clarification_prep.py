@@ -5,7 +5,7 @@ import json
 from typing import Dict
 
 from agents.core.graph_executor import AgentNodeExecutionContext, AgentPipelineNodeResult
-from agents.core.pipeline import AgentPipelineNodePlan
+from agents.pipeline.pipeline import AgentPipelineNodePlan
 
 
 def _build_prompt_addition(summary: Dict[str, object]) -> str:
@@ -28,6 +28,7 @@ async def run_clarification_prep_node(
         "clarification_reason": getattr(intent_context, "clarification_reason", ""),
         "suggested_hint_title": getattr(intent_context, "suggested_hint_title", ""),
         "suggested_hint_options": getattr(intent_context, "suggested_hint_options", []),
+        "retryable": False,
     }
     return AgentPipelineNodeResult(
         status="completed",

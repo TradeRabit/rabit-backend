@@ -1,4 +1,4 @@
-"""Agent pipeline trace models and dispatch planning."""
+"""Agent pipeline trace models and dependency-aware dispatch planning."""
 from __future__ import annotations
 
 import re
@@ -6,7 +6,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from agents.intent_router import AgentIntentContext
+from config.settings import settings
+from agents.pipeline.intent_router import AgentIntentContext
 
 
 SPECIALIST_TARGET_MARKET = "market_specialist"
@@ -24,6 +25,7 @@ PIPELINE_NODE_RESEARCH_SNAPSHOT = "research_snapshot"
 PIPELINE_NODE_PORTFOLIO_SNAPSHOT = "portfolio_snapshot"
 PIPELINE_NODE_EXECUTION_SNAPSHOT = "execution_snapshot"
 PIPELINE_NODE_MEMORY_SNAPSHOT = "memory_snapshot"
+PIPELINE_NODE_RISK_REVIEW = "risk_review"
 PIPELINE_NODE_RESPONSE_COMPOSER = "response_composer"
 
 
@@ -70,6 +72,10 @@ class AgentPipelineNodePlan(BaseModel):
     status: str = "planned"
     summary: str = ""
     instruction: str = ""
+    depends_on: List[str] = Field(default_factory=list)
+    retry_attempts: int = 0
+    retry_backoff_seconds: float = 0.0
+    retry_on_statuses: List[str] = Field(default_factory=lambda: ["degraded", "failed"])
     config: Dict[str, Any] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
@@ -91,6 +97,7 @@ class AgentPipelineTrace(BaseModel):
     final_status: str = "pending"
     stages: List[AgentPipelineStage] = Field(default_factory=list)
     pipeline_nodes: List[AgentPipelineNodePlan] = Field(default_factory=list)
+    artifacts: List[Dict[str, Any]] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
 
     def update_stage(
@@ -167,6 +174,11 @@ class AgentPipelineTrace(BaseModel):
     def finalize(self, status: str) -> None:
         """Mark final status for the pipeline."""
         self.final_status = status
+
+    def add_artifact(self, artifact: Dict[str, Any]) -> None:
+        """Append one persisted pipeline artifact to the trace."""
+        if artifact:
+            self.artifacts.append(dict(artifact))
 
     def resolve_next_agent_status(self) -> str:
         """Derive a more honest next-agent execution status from the executed nodes."""
@@ -292,6 +304,32 @@ def resolve_selected_next_agent(
     return resolve_specialist_target(intent_context)
 
 
+def _extract_symbol_from_request(
+    user_input: str,
+    market_context: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    """Infer whether a symbol is available before node execution begins."""
+    context_symbol = str((market_context or {}).get("symbol") or "").strip().upper()
+    if context_symbol:
+        return context_symbol
+
+    text = (user_input or "").upper()
+    for symbol in [item.strip().upper() for item in settings.TRADING_ASSETS if item.strip()]:
+        if re.search(rf"\b{re.escape(symbol)}\b", text):
+            return symbol
+    return None
+
+
+def _has_enabled_execution_gate(
+    backpack_execution: Optional[Dict[str, Any]],
+    drift_execution: Optional[Dict[str, Any]],
+) -> bool:
+    """Return whether any live execution gate is enabled for this request."""
+    backpack_enabled = bool((backpack_execution or {}).get("enabled"))
+    drift_enabled = bool((drift_execution or {}).get("enabled"))
+    return backpack_enabled or drift_enabled
+
+
 def should_plan_market_snapshot(intent_context: AgentIntentContext) -> bool:
     """Return whether this request should include the market-snapshot node."""
     if intent_context.should_clarify:
@@ -342,13 +380,52 @@ def should_plan_memory_snapshot(intent_context: AgentIntentContext) -> bool:
     return resolve_specialist_target(intent_context) == SPECIALIST_TARGET_MEMORY
 
 
+def should_plan_risk_review(
+    intent_context: AgentIntentContext,
+    user_input: str,
+) -> bool:
+    """Return whether this request should include the risk-review node."""
+    if intent_context.should_clarify:
+        return False
+    if intent_context.confidence not in {"high", "medium"}:
+        return False
+
+    if (
+        intent_context.user_goal_type == "risk_review"
+        or intent_context.analysis_scope == "risk_review"
+    ):
+        return True
+
+    if intent_context.intent in {"position_management", "position_sizing"}:
+        return True
+
+    text = (user_input or "").lower()
+    risk_keywords = {
+        "risk",
+        "r:r",
+        "rr",
+        "invalidation",
+        "stop",
+        "stop loss",
+        "downside",
+        "worth taking",
+    }
+    return any(keyword in text for keyword in risk_keywords)
+
+
 def build_pipeline_nodes(
     *,
     intent_context: AgentIntentContext,
     user_input: str,
+    market_context: Optional[Dict[str, Any]] = None,
+    backpack_execution: Optional[Dict[str, Any]] = None,
+    drift_execution: Optional[Dict[str, Any]] = None,
 ) -> List[AgentPipelineNodePlan]:
     """Build a composable execution-node plan for one request."""
     nodes: List[AgentPipelineNodePlan] = []
+    preplanned_symbol = _extract_symbol_from_request(user_input, market_context)
+    chart_planned = False
+    execution_gate_enabled = _has_enabled_execution_gate(backpack_execution, drift_execution)
 
     if intent_context.should_clarify:
         nodes.append(
@@ -362,6 +439,7 @@ def build_pipeline_nodes(
                 config={
                     "llm_allowed_tool_names": ["show_hint"],
                 },
+                retry_attempts=0,
             )
         )
         nodes.append(
@@ -389,11 +467,13 @@ def build_pipeline_nodes(
                         "show_thinking_summary",
                     ],
                 },
+                retry_attempts=0,
             )
         )
 
     write_mode = should_enable_chart_write(intent_context, user_input)
     if should_plan_chart_analysis(intent_context, user_input) or write_mode:
+        chart_planned = True
         nodes.append(
             AgentPipelineNodePlan(
                 name=PIPELINE_NODE_CHART_ANALYSIS,
@@ -447,10 +527,12 @@ def build_pipeline_nodes(
                         ]
                     ),
                 },
+                retry_attempts=1,
+                retry_backoff_seconds=0.05,
             )
         )
 
-    if should_plan_market_snapshot(intent_context):
+    if should_plan_market_snapshot(intent_context) and (chart_planned or preplanned_symbol):
         nodes.append(
             AgentPipelineNodePlan(
                 name=PIPELINE_NODE_MARKET_SNAPSHOT,
@@ -462,7 +544,10 @@ def build_pipeline_nodes(
                 ),
                 config={
                     "max_headlines": 3,
+                    "requires_symbol_resolution": True,
                 },
+                retry_attempts=1,
+                retry_backoff_seconds=0.05,
             )
         )
 
@@ -480,6 +565,8 @@ def build_pipeline_nodes(
                     "max_headlines": 3,
                     "max_search_results": 3,
                 },
+                retry_attempts=1,
+                retry_backoff_seconds=0.05,
             )
         )
 
@@ -493,6 +580,8 @@ def build_pipeline_nodes(
                     "position context from connected exchanges. Gather only the state needed to improve the final answer."
                 ),
                 config={},
+                retry_attempts=1,
+                retry_backoff_seconds=0.05,
             )
         )
 
@@ -505,7 +594,11 @@ def build_pipeline_nodes(
                     "Act as an execution-snapshot specialist step. Focus on read-only execution readiness, open-order "
                     "state, and whether Backpack or Drift execution is enabled for this request."
                 ),
-                config={},
+                config={
+                    "execution_gate_enabled_preplan": execution_gate_enabled,
+                },
+                retry_attempts=1,
+                retry_backoff_seconds=0.05,
             )
         )
 
@@ -521,6 +614,43 @@ def build_pipeline_nodes(
                 config={
                     "memory_limit": 5,
                 },
+                retry_attempts=1,
+                retry_backoff_seconds=0.05,
+            )
+        )
+
+    upstream_nodes = {
+        node.name
+        for node in nodes
+        if node.name != PIPELINE_NODE_GENERAL_FALLBACK
+    }
+    risk_dependencies = [
+        name
+        for name in (
+            PIPELINE_NODE_CHART_ANALYSIS,
+            PIPELINE_NODE_MARKET_SNAPSHOT,
+            PIPELINE_NODE_RESEARCH_SNAPSHOT,
+            PIPELINE_NODE_PORTFOLIO_SNAPSHOT,
+            PIPELINE_NODE_EXECUTION_SNAPSHOT,
+            PIPELINE_NODE_MEMORY_SNAPSHOT,
+        )
+        if name in upstream_nodes
+    ]
+    if should_plan_risk_review(intent_context, user_input) and risk_dependencies:
+        nodes.append(
+            AgentPipelineNodePlan(
+                name=PIPELINE_NODE_RISK_REVIEW,
+                summary="Review downside, invalidation, and caution flags before the main answer.",
+                instruction=(
+                    "Act as a risk-review specialist step. Focus on invalidation, downside, fresh-news risk, "
+                    "upstream degradation, and whether the observed setup looks actionable or fragile. "
+                    "Do not invent risk controls that are not supported by node observations or the user request."
+                ),
+                depends_on=risk_dependencies,
+                config={
+                    "requires_observation_nodes": risk_dependencies,
+                },
+                retry_attempts=0,
             )
         )
 
@@ -528,7 +658,9 @@ def build_pipeline_nodes(
         AgentPipelineNodePlan(
             name=PIPELINE_NODE_RESPONSE_COMPOSER,
             summary="Use the accumulated node observations when forming the final response.",
+            depends_on=[node.name for node in nodes if node.name != PIPELINE_NODE_GENERAL_FALLBACK],
             config={},
+            retry_attempts=0,
         )
     )
     return nodes
@@ -539,6 +671,9 @@ def build_pipeline_trace(
     entry_agent: str,
     intent_context: AgentIntentContext,
     user_input: str = "",
+    market_context: Optional[Dict[str, Any]] = None,
+    backpack_execution: Optional[Dict[str, Any]] = None,
+    drift_execution: Optional[Dict[str, Any]] = None,
 ) -> AgentPipelineTrace:
     """Build a default pipeline trace after routing."""
     selected_next_agent = resolve_selected_next_agent(intent_context, user_input)
@@ -553,6 +688,9 @@ def build_pipeline_trace(
         pipeline_nodes=build_pipeline_nodes(
             intent_context=intent_context,
             user_input=user_input,
+            market_context=market_context,
+            backpack_execution=backpack_execution,
+            drift_execution=drift_execution,
         ),
     )
     trace.update_stage(

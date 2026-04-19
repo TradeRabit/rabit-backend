@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import pytest
 
 from agents.core.graph_executor import AgentNodeExecutionContext
-from agents.core.pipeline import AgentPipelineNodePlan
-from agents.intent_router import AgentIntentContext
+from agents.pipeline.pipeline import AgentPipelineNodePlan
+from agents.pipeline.intent_router import AgentIntentContext
 from agents.nodes.portfolio_snapshot import run_portfolio_snapshot_node
 
 

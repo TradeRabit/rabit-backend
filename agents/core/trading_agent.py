@@ -2,8 +2,8 @@
 from .base import BaseAgent
 from typing import Any, Dict, List, Optional
 
-from agents.conversation_style import CONVERSATION_STYLE_NORMAL
-from agents.trading_style import TRADING_STYLE_BALANCED
+from agents.pipeline.conversation_style import CONVERSATION_STYLE_NORMAL
+from agents.pipeline.trading_style import TRADING_STYLE_BALANCED
 from agents.system_prompts import get_trading_agent_prompt
 from agents.uploads import AgentAttachment
 

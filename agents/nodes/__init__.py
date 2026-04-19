@@ -8,6 +8,7 @@ from .memory_snapshot import run_memory_snapshot_node
 from .market_snapshot import run_market_snapshot_node
 from .portfolio_snapshot import run_portfolio_snapshot_node
 from .research_snapshot import run_research_snapshot_node
+from .risk_review import run_risk_review_node
 from .response_composer import run_response_composer_node
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "run_portfolio_snapshot_node",
     "run_execution_snapshot_node",
     "run_memory_snapshot_node",
+    "run_risk_review_node",
     "run_response_composer_node",
 ]

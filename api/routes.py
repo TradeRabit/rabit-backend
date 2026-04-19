@@ -19,7 +19,7 @@ from agents.auth import (
     verify_wallet_auth,
 )
 from agents.backpack_execution import normalize_backpack_execution
-from agents.conversation_style import normalize_conversation_style
+from agents.pipeline.conversation_style import normalize_conversation_style
 from agents.drift_execution import (
     DriftExecutionRequestNotFoundError,
     DriftExecutionRequestOwnershipError,
@@ -37,10 +37,11 @@ from agents.exchange_connections import (
     ExchangeCredentialCryptoError,
     get_exchange_connection_service,
 )
-from agents.market_context import normalize_market_context
+from agents.pipeline.market_context import normalize_market_context
 from agents.memory import Mem0DisabledError, Mem0RequestError, get_mem0_client
 from agents.openrouter import get_openrouter_session_cost_service
-from agents.trading_style import normalize_trading_style
+from agents.pipeline.artifacts import get_pipeline_artifact_service
+from agents.pipeline.trading_style import normalize_trading_style
 from agents.tools_registry import register_trading_tools
 from agents.uploads import UploadValidationError, get_upload_manager
 from config.settings import settings
@@ -70,6 +71,8 @@ from api.models import (
     AgentUploadDeleteResponse,
     AgentChatRequest,
     AgentChatResponse,
+    AgentPipelineArtifactListResponse,
+    AgentPipelineArtifactResponse,
     AuthMeResponse,
     DriftExecutionPrepareRequest,
     DriftExecutionRecordResponse,
@@ -555,6 +558,60 @@ async def get_openrouter_session_cost(
         )
 
     return OpenRouterSessionCostResponse(**summary)
+
+
+@router.get(
+    "/agent/artifacts/{scope_id}",
+    response_model=AgentPipelineArtifactListResponse,
+    tags=["Agent"],
+    summary="Return persisted pipeline artifacts for one scope",
+)
+async def get_agent_pipeline_artifacts(
+    scope_id: str,
+    user_id: Optional[str] = Query(
+        None,
+        description="Optional explicit user ID when no bearer token is available",
+    ),
+    authorization: Optional[str] = Header(default=None),
+):
+    """Return persisted pipeline artifacts for one chat/session scope."""
+    auth_user = _get_authenticated_user(authorization)
+    resolved_user_id = _resolve_request_user_id(
+        provided_user_id=user_id,
+        auth_user=auth_user,
+    )
+    if not resolved_user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated user or explicit user_id is required for pipeline artifact access.",
+        )
+
+    summary = get_pipeline_artifact_service().list_scope_artifacts(scope_id=scope_id)
+    if not summary:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No pipeline artifacts found for scope_id '{scope_id}'.",
+        )
+
+    owner_user_id = summary.get("user_id")
+    if owner_user_id and owner_user_id != resolved_user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Requested scope_id does not belong to the authenticated user.",
+        )
+
+    artifacts = [
+        AgentPipelineArtifactResponse(**item)
+        for item in summary.get("artifacts", [])
+    ]
+    return AgentPipelineArtifactListResponse(
+        scope_id=summary.get("scope_id", scope_id),
+        user_id=owner_user_id,
+        artifacts=artifacts,
+        total=len(artifacts),
+        created_at=summary.get("created_at"),
+        updated_at=summary.get("updated_at"),
+    )
 
 
 @router.post(

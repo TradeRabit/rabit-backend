@@ -5,7 +5,7 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from agents.core.graph_executor import AgentNodeExecutionContext, AgentPipelineNodeResult
-from agents.core.pipeline import AgentPipelineNodePlan, SPECIALIST_TARGET_MEMORY, resolve_specialist_target
+from agents.pipeline.pipeline import AgentPipelineNodePlan, SPECIALIST_TARGET_MEMORY, resolve_specialist_target
 
 
 async def _call_required_tool(
@@ -39,6 +39,7 @@ async def run_memory_snapshot_node(
         return AgentPipelineNodeResult(
             status="skipped",
             summary="Memory snapshot node skipped because the request is not memory-oriented.",
+            metadata={"retryable": False},
         )
 
     ok, payload, error = await _call_required_tool(
@@ -66,6 +67,7 @@ async def run_memory_snapshot_node(
             }
         ],
         "errors": errors,
+        "retryable": bool(errors),
     }
 
     status = "completed" if ok and not errors else "degraded"

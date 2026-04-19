@@ -6,7 +6,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from agents.core.graph_executor import AgentNodeExecutionContext, AgentPipelineNodeResult
-from agents.core.pipeline import AgentPipelineNodePlan
+from agents.pipeline.pipeline import AgentPipelineNodePlan
 from config.settings import settings
 
 
@@ -119,7 +119,7 @@ async def run_research_snapshot_node(
         return AgentPipelineNodeResult(
             status="skipped",
             summary="Research snapshot node skipped because the request is not research-like.",
-            metadata={"intent": intent},
+            metadata={"intent": intent, "retryable": False},
         )
 
     symbol = _extract_requested_symbol(context.user_input, context.market_context or {})
@@ -187,6 +187,7 @@ async def run_research_snapshot_node(
         "web_results": web_results,
         "loop_trace": loop_trace,
         "errors": errors,
+        "retryable": bool(errors),
     }
 
     status = "completed" if (news_items or web_results) and not errors else "degraded"

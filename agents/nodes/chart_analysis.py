@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from config.settings import settings
 from agents.core.graph_executor import AgentNodeExecutionContext, AgentPipelineNodeResult
-from agents.core.pipeline import AgentPipelineNodePlan
+from agents.pipeline.pipeline import AgentPipelineNodePlan
 from agents.tools.tradingview.indicators import INDICATOR_MAP
 
 
@@ -373,6 +373,7 @@ async def _run_analysis_mode(
                 "requested_symbol": desired_symbol,
                 "requested_timeframe": desired_timeframe,
                 "requested_indicators": desired_indicators,
+                "retryable": True,
             },
         )
 
@@ -475,6 +476,7 @@ async def _run_analysis_mode(
         "indicator_values": indicator_values,
         "loop_trace": loop_trace,
         "errors": errors,
+        "retryable": bool(errors),
     }
     status = "completed" if not errors else "degraded"
     summary = (
@@ -515,6 +517,7 @@ async def _run_write_mode(
                 "errors": errors,
                 "requested_symbol": desired_symbol,
                 "requested_timeframe": desired_timeframe,
+                "retryable": True,
             },
         )
 
@@ -562,6 +565,7 @@ async def _run_write_mode(
             "unmet_requirements": unmet_requirements,
             "loop_trace": loop_trace,
             "errors": errors,
+            "retryable": False,
         }
         return AgentPipelineNodeResult(
             status="degraded",
@@ -692,6 +696,31 @@ async def _run_write_mode(
             }
         )
 
+    persisted_artifacts: List[Dict[str, Any]] = []
+    if context.persist_artifact is not None and applied_actions:
+        persisted = context.persist_artifact(
+            node_name=plan.name,
+            kind="chart_write_screenshot" if screenshot_payload else "chart_write",
+            payload={
+                "chart_mode": "write",
+                "scope_mode": scope_mode,
+                "effective_symbol": current_symbol,
+                "effective_timeframe": current_timeframe,
+                "requested_actions": requested_actions,
+                "applied_actions": applied_actions,
+                "screenshot_url": (
+                    screenshot_payload.get("screenshot_url")
+                    or (screenshot_payload.get("data") or {}).get("screenshot_url")
+                ),
+            },
+            metadata={
+                "locked_symbol": locked_symbol,
+                "symbol_change_blocked": symbol_change_blocked,
+            },
+        )
+        if persisted:
+            persisted_artifacts.append(persisted)
+
     summary_payload = {
         "chart_mode": "write",
         "scope_mode": scope_mode,
@@ -705,8 +734,10 @@ async def _run_write_mode(
         "applied_actions": applied_actions,
         "unmet_requirements": unmet_requirements,
         "screenshot": screenshot_payload.get("data", screenshot_payload),
+        "artifacts": persisted_artifacts,
         "loop_trace": loop_trace,
         "errors": errors,
+        "retryable": bool(errors and not unmet_requirements),
     }
     status = "completed" if applied_actions and not errors else "degraded"
     summary = (

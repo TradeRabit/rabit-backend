@@ -236,6 +236,20 @@ from agents.system_prompts import get_trading_agent_prompt
 from agents.configs import get_trading_agent_config
 ```
 
+## Pipeline Family
+
+Pipeline-related helpers now live together under `agents/pipeline/`.
+
+That family contains:
+
+- `conversation_style.py`
+- `trading_style.py`
+- `market_context.py`
+- `intent_router.py`
+- `pipeline.py`
+
+This is now the canonical location of the pipeline family, so routing, style normalization, market context, and pipeline planning all live together in one package.
+
 ## Summary
 
 - ✅ Clean structure

@@ -3,6 +3,7 @@ Rabit Trading Agent System
 
 This package contains the core agent system including:
 - Agent implementations (core/)
+- Pipeline orchestration helpers (pipeline/)
 - Tool registry (tools_registry/)
 - System prompts (system_prompts/)
 - Agent configurations (configs/)
@@ -55,6 +56,22 @@ from agents.context import (
     get_context_for_agent
 )
 from agents.memory import Mem0Error, Mem0DisabledError, Mem0RequestError, get_mem0_client
+from agents.pipeline import (
+    AgentIntentContext,
+    AgentPipelineArtifactService,
+    AgentPipelineTrace,
+    build_intent_prompt,
+    build_pipeline_trace,
+    build_pipeline_nodes,
+    get_conversation_style_guidance,
+    get_market_context_guidance,
+    get_pipeline_artifact_service,
+    get_trading_style_guidance,
+    normalize_conversation_style,
+    normalize_market_context,
+    normalize_trading_style,
+    parse_intent_response,
+)
 
 __version__ = "1.0.0"
 
@@ -89,6 +106,20 @@ __all__ = [
     "Mem0DisabledError",
     "Mem0RequestError",
     "get_mem0_client",
+    "AgentIntentContext",
+    "AgentPipelineArtifactService",
+    "AgentPipelineTrace",
+    "build_intent_prompt",
+    "build_pipeline_nodes",
+    "build_pipeline_trace",
+    "get_conversation_style_guidance",
+    "get_market_context_guidance",
+    "get_pipeline_artifact_service",
+    "get_trading_style_guidance",
+    "normalize_conversation_style",
+    "normalize_market_context",
+    "normalize_trading_style",
+    "parse_intent_response",
     
     # System Prompts
     "load_prompt",

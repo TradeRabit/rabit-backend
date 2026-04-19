@@ -11,24 +11,25 @@ from agents.backpack_execution import (
     normalize_backpack_execution,
 )
 from agents.compression import ConversationCompressor
-from agents.conversation_style import (
+from agents.pipeline.conversation_style import (
     CONVERSATION_STYLE_NORMAL,
     get_conversation_style_guidance,
     normalize_conversation_style,
 )
 from agents.openrouter import get_openrouter_session_cost_service
-from agents.intent_router import AgentIntentContext, build_intent_prompt, parse_intent_response
+from agents.pipeline.intent_router import AgentIntentContext, build_intent_prompt, parse_intent_response
+from agents.pipeline.artifacts import get_pipeline_artifact_service
 from agents.drift_execution import (
     get_drift_execution_guidance,
     normalize_drift_execution,
 )
 from agents.memory import ConversationMemory, Mem0Error, Message, get_mem0_client
-from agents.market_context import get_market_context_guidance, normalize_market_context
+from agents.pipeline.market_context import get_market_context_guidance, normalize_market_context
 from agents.core.graph_executor import (
     AgentNodeExecutionContext,
     build_default_graph_executor,
 )
-from agents.core.pipeline import AgentPipelineTrace, build_pipeline_trace
+from agents.pipeline.pipeline import AgentPipelineTrace, build_pipeline_trace
 from agents.tools import ToolResult, tool_registry
 from agents.tools.core.runtime_context import (
     reset_current_backpack_execution,
@@ -43,7 +44,7 @@ from agents.tools.core.runtime_context import (
     set_current_user_id,
 )
 from agents.uploads import AgentAttachment
-from agents.trading_style import (
+from agents.pipeline.trading_style import (
     TRADING_STYLE_BALANCED,
     get_trading_style_guidance,
     normalize_trading_style,
@@ -105,6 +106,7 @@ class BaseAgent:
 
         self.memory = ConversationMemory()
         self.session_costs = get_openrouter_session_cost_service()
+        self.pipeline_artifacts = get_pipeline_artifact_service()
         self.compressor = ConversationCompressor(
             max_tokens=max_tokens,
             model=self.model,
@@ -117,6 +119,7 @@ class BaseAgent:
         self.last_market_context = normalize_market_context(None)
         self.last_backpack_execution = normalize_backpack_execution(None)
         self.last_drift_execution = normalize_drift_execution(None)
+        self.last_pipeline_artifacts: List[Dict[str, Any]] = []
         self.last_session_cost_summary: Optional[Dict[str, Any]] = None
         self.last_pipeline_trace: Optional[AgentPipelineTrace] = None
         self.last_safe_error_message: Optional[str] = None
@@ -178,6 +181,7 @@ class BaseAgent:
         self.last_market_context = market_context
         self.last_backpack_execution = backpack_execution
         self.last_drift_execution = drift_execution
+        self.last_pipeline_artifacts = []
         self.last_safe_error_message = None
 
         user_summary = self._build_memory_user_text(user_input, attachments)
@@ -192,6 +196,9 @@ class BaseAgent:
             entry_agent=self.name,
             intent_context=intent_context,
             user_input=user_input,
+            market_context=market_context,
+            backpack_execution=backpack_execution,
+            drift_execution=drift_execution,
         )
 
         effective_system_prompt = await self._build_effective_system_prompt(
@@ -220,6 +227,31 @@ class BaseAgent:
                 result.error or "Unknown tool failure",
             )
         return result
+
+    def _persist_pipeline_artifact(
+        self,
+        *,
+        node_name: str,
+        kind: str,
+        payload: Dict[str, Any],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Persist one session-scoped pipeline artifact when scope storage is available."""
+        if not self.scope_id:
+            return None
+
+        artifact = self.pipeline_artifacts.record_artifact(
+            scope_id=self.scope_id,
+            user_id=self.user_id,
+            node_name=node_name,
+            kind=kind,
+            payload=payload,
+            metadata=metadata,
+        )
+        self.last_pipeline_artifacts.append(artifact)
+        if self.last_pipeline_trace is not None:
+            self.last_pipeline_trace.add_artifact(artifact)
+        return artifact
 
     async def _run_pipeline_nodes(
         self,
@@ -256,8 +288,11 @@ class BaseAgent:
                 system_prompt=system_prompt,
                 intent_context=intent_context,
                 market_context=self.last_market_context,
+                scope_id=self.scope_id,
+                user_id=self.user_id,
                 event_emitter=event_emitter,
                 call_tool=self._execute_tool_for_node,
+                persist_artifact=self._persist_pipeline_artifact,
             )
             context = await self.graph_executor.execute(
                 plans=pipeline.pipeline_nodes,
@@ -284,6 +319,7 @@ class BaseAgent:
                 "executed_nodes": [node.name for node in pipeline.pipeline_nodes],
                 "degraded_nodes": degraded_nodes,
                 "node_observations": context.observations,
+                "artifact_count": len(self.last_pipeline_artifacts),
             },
         )
         pipeline.next_agent_status = pipeline.resolve_next_agent_status()

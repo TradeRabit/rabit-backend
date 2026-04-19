@@ -1,4 +1,4 @@
-from agents.market_context import get_market_context_guidance, normalize_market_context
+from agents.pipeline.market_context import get_market_context_guidance, normalize_market_context
 
 
 def test_normalize_market_context_supports_locked_asset_and_state():

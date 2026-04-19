@@ -80,6 +80,13 @@ class Settings:
     AGENT_UPLOAD_DIR = Path(os.getenv("AGENT_UPLOAD_DIR", "data/uploads/tmp"))
     AGENT_UPLOAD_TTL_SECONDS = int(os.getenv("AGENT_UPLOAD_TTL_SECONDS", "3600"))
     AGENT_UPLOAD_MAX_SIZE_MB = int(os.getenv("AGENT_UPLOAD_MAX_SIZE_MB", "10"))
+    AGENT_PIPELINE_ARTIFACTS_DB_PATH = os.getenv(
+        "AGENT_PIPELINE_ARTIFACTS_DB_PATH",
+        "data/agent_pipeline_artifacts.json",
+    )
+    AGENT_PIPELINE_ARTIFACT_TTL_SECONDS = int(
+        os.getenv("AGENT_PIPELINE_ARTIFACT_TTL_SECONDS", "604800")
+    )
     
     # Mem0 Configuration
     MEM0_ENABLED = os.getenv("MEM0_ENABLED", "true").lower() == "true"

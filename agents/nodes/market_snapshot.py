@@ -6,7 +6,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from agents.core.graph_executor import AgentNodeExecutionContext, AgentPipelineNodeResult
-from agents.core.pipeline import AgentPipelineNodePlan
+from agents.pipeline.pipeline import AgentPipelineNodePlan
 from config.settings import settings
 
 
@@ -116,7 +116,7 @@ async def run_market_snapshot_node(
         return AgentPipelineNodeResult(
             status="skipped",
             summary="Market snapshot node skipped because no asset symbol could be resolved.",
-            metadata={"resolved_symbol": None},
+            metadata={"resolved_symbol": None, "retryable": False},
         )
 
     errors: List[str] = []
@@ -159,6 +159,7 @@ async def run_market_snapshot_node(
         "news_headlines": news_items,
         "loop_trace": loop_trace,
         "errors": errors,
+        "retryable": bool(errors),
     }
 
     status = "completed" if (price_snapshot or news_items) and not errors else "degraded"

@@ -5,7 +5,7 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from agents.core.graph_executor import AgentNodeExecutionContext, AgentPipelineNodeResult
-from agents.core.pipeline import AgentPipelineNodePlan, SPECIALIST_TARGET_PORTFOLIO, resolve_specialist_target
+from agents.pipeline.pipeline import AgentPipelineNodePlan, SPECIALIST_TARGET_PORTFOLIO, resolve_specialist_target
 
 
 async def _call_required_tool(
@@ -39,6 +39,7 @@ async def run_portfolio_snapshot_node(
         return AgentPipelineNodeResult(
             status="skipped",
             summary="Portfolio snapshot node skipped because the request is not portfolio-oriented.",
+            metadata={"retryable": False},
         )
 
     errors: List[str] = []
@@ -72,6 +73,7 @@ async def run_portfolio_snapshot_node(
         "portfolio_sections": sections,
         "loop_trace": loop_trace,
         "errors": errors,
+        "retryable": bool(errors),
     }
 
     status = "completed" if sections and not errors else "degraded"

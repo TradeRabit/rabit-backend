@@ -2,7 +2,8 @@ import asyncio
 from types import SimpleNamespace
 
 from agents.core.base import BaseAgent
-from agents.core.pipeline import (
+from agents.core.graph_executor import AgentGraphExecutor, AgentNodeExecutionContext, AgentPipelineNodeResult
+from agents.pipeline.pipeline import (
     PIPELINE_NODE_CLARIFICATION_PREP,
     PIPELINE_NODE_CHART_ANALYSIS,
     PIPELINE_NODE_EXECUTION_SNAPSHOT,
@@ -11,6 +12,7 @@ from agents.core.pipeline import (
     PIPELINE_NODE_MARKET_SNAPSHOT,
     PIPELINE_NODE_PORTFOLIO_SNAPSHOT,
     PIPELINE_NODE_RESEARCH_SNAPSHOT,
+    PIPELINE_NODE_RISK_REVIEW,
     PIPELINE_NODE_RESPONSE_COMPOSER,
     SPECIALIST_TARGET_CLARIFICATION,
     SPECIALIST_TARGET_EXECUTION,
@@ -19,11 +21,12 @@ from agents.core.pipeline import (
     SPECIALIST_TARGET_MEMORY,
     SPECIALIST_TARGET_PORTFOLIO,
     SPECIALIST_TARGET_RESEARCH,
+    AgentPipelineNodePlan,
     build_pipeline_nodes,
     build_pipeline_trace,
     resolve_specialist_target,
 )
-from agents.intent_router import AgentIntentContext
+from agents.pipeline.intent_router import AgentIntentContext
 from agents.tools_registry import register_trading_tools
 
 
@@ -125,6 +128,10 @@ def test_build_pipeline_trace_is_serializable_and_marks_fallback():
                     "show_thinking_summary",
                 ],
             },
+            "depends_on": [],
+            "retry_attempts": 0,
+            "retry_backoff_seconds": 0.0,
+            "retry_on_statuses": ["degraded", "failed"],
             "metadata": {},
         },
         {
@@ -132,6 +139,10 @@ def test_build_pipeline_trace_is_serializable_and_marks_fallback():
             "status": "planned",
             "summary": "Use the accumulated node observations when forming the final response.",
             "instruction": "",
+            "depends_on": [],
+            "retry_attempts": 0,
+            "retry_backoff_seconds": 0.0,
+            "retry_on_statuses": ["degraded", "failed"],
             "config": {},
             "metadata": {},
         }
@@ -268,11 +279,54 @@ def test_build_pipeline_nodes_plans_research_snapshot_for_research_requests():
     )
 
     assert [node.name for node in nodes] == [
+        PIPELINE_NODE_RESEARCH_SNAPSHOT,
+        PIPELINE_NODE_RESPONSE_COMPOSER,
+    ]
+    assert nodes[0].config["max_search_results"] == 3
+
+
+def test_build_pipeline_nodes_plans_market_snapshot_when_symbol_is_pre_resolved():
+    context = AgentIntentContext(
+        intent="macro_context",
+        confidence="high",
+        preferred_tool_groups=["research", "market", "ui"],
+    )
+
+    nodes = build_pipeline_nodes(
+        intent_context=context,
+        user_input="What is the macro context for BTC today?",
+        market_context={"scope_mode": "global", "symbol": "BTC"},
+    )
+
+    assert [node.name for node in nodes] == [
         PIPELINE_NODE_MARKET_SNAPSHOT,
         PIPELINE_NODE_RESEARCH_SNAPSHOT,
         PIPELINE_NODE_RESPONSE_COMPOSER,
     ]
-    assert nodes[1].config["max_search_results"] == 3
+
+
+def test_build_pipeline_nodes_plans_risk_review_for_risk_scoped_requests():
+    context = AgentIntentContext(
+        intent="market_analysis",
+        confidence="high",
+        analysis_mode="technical",
+        analysis_scope="risk_review",
+        preferred_tool_groups=["market", "chart", "ui"],
+        indicator_preference="indicator_light",
+    )
+
+    nodes = build_pipeline_nodes(
+        intent_context=context,
+        user_input="Review BTC risk and invalidation",
+    )
+
+    assert [node.name for node in nodes] == [
+        PIPELINE_NODE_CHART_ANALYSIS,
+        PIPELINE_NODE_MARKET_SNAPSHOT,
+        PIPELINE_NODE_RISK_REVIEW,
+        PIPELINE_NODE_RESPONSE_COMPOSER,
+    ]
+    assert nodes[2].instruction.startswith("Act as a risk-review specialist step.")
 
 
 def test_build_pipeline_nodes_plans_portfolio_execution_and_memory_snapshots():
@@ -292,6 +346,7 @@ def test_build_pipeline_nodes_plans_portfolio_execution_and_memory_snapshots():
     assert [node.name for node in portfolio_nodes] == [PIPELINE_NODE_PORTFOLIO_SNAPSHOT, PIPELINE_NODE_RESPONSE_COMPOSER]
     assert [node.name for node in execution_nodes] == [PIPELINE_NODE_EXECUTION_SNAPSHOT, PIPELINE_NODE_RESPONSE_COMPOSER]
     assert [node.name for node in memory_nodes] == [PIPELINE_NODE_MEMORY_SNAPSHOT, PIPELINE_NODE_RESPONSE_COMPOSER]
+    assert execution_nodes[0].config["execution_gate_enabled_preplan"] is False
 
 
 def test_effective_allowed_tool_names_respects_node_allow_and_block_lists(monkeypatch):
@@ -299,7 +354,7 @@ def test_effective_allowed_tool_names_respects_node_allow_and_block_lists(monkey
     monkeypatch.setattr("agents.core.base.AsyncAnthropic", DummyAsyncAnthropic)
     monkeypatch.setattr("agents.core.base.get_mem0_client", lambda: DummyMem0Client())
 
-    agent = BaseAgent(name="TradingAgent", system_prompt="You are helpful.")
+    agent = BaseAgent(name="TradingAgent", system_prompt="You are helpful.", scope_id="scope-1")
 
     chart_context = AgentIntentContext(
         intent="market_analysis",
@@ -354,12 +409,76 @@ def test_effective_allowed_tool_names_respects_node_allow_and_block_lists(monkey
     }
 
 
+def test_graph_executor_retries_retryable_degraded_nodes():
+    attempts = {"count": 0}
+
+    async def flaky_handler(context, plan):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return AgentPipelineNodeResult(
+                status="degraded",
+                summary="Transient issue",
+                metadata={"retryable": True},
+            )
+        return AgentPipelineNodeResult(
+            status="completed",
+            summary="Recovered",
+            metadata={"retryable": False},
+        )
+
+    executor = AgentGraphExecutor({"market_snapshot": flaky_handler})
+    context = AgentNodeExecutionContext(
+        agent=object(),
+        user_input="Check BTC",
+        messages=[],
+        system_prompt="base",
+        intent_context=AgentIntentContext(intent="market_analysis", confidence="high"),
+        market_context={"symbol": "BTC"},
+    )
+    plan = AgentPipelineNodePlan(
+        name="market_snapshot",
+        retry_attempts=1,
+        retry_backoff_seconds=0.0,
+    )
+
+    updated = asyncio.run(executor.execute(plans=[plan], context=context))
+
+    assert attempts["count"] == 2
+    assert plan.status == "completed"
+    assert updated.observations["market_snapshot"]["attempt_count"] == 2
+    assert updated.observations["market_snapshot"]["retry_count"] == 1
+
+
+def test_graph_executor_skips_symbol_dependent_node_when_symbol_missing():
+    async def should_not_run(context, plan):
+        raise AssertionError("Handler should not run when symbol dependency is missing")
+
+    executor = AgentGraphExecutor({"market_snapshot": should_not_run})
+    context = AgentNodeExecutionContext(
+        agent=object(),
+        user_input="Give me macro context",
+        messages=[],
+        system_prompt="base",
+        intent_context=AgentIntentContext(intent="macro_context", confidence="high"),
+        market_context={"scope_mode": "global"},
+    )
+    plan = AgentPipelineNodePlan(
+        name="market_snapshot",
+        config={"requires_symbol_resolution": True},
+    )
+
+    updated = asyncio.run(executor.execute(plans=[plan], context=context))
+
+    assert plan.status == "skipped"
+    assert updated.observations["market_snapshot"]["dependency_reason"] == "missing_symbol"
+
+
 def test_base_agent_tracks_pipeline_trace(monkeypatch):
     monkeypatch.setattr("agents.core.base.Anthropic", DummyAnthropic)
     monkeypatch.setattr("agents.core.base.AsyncAnthropic", DummyAsyncAnthropic)
     monkeypatch.setattr("agents.core.base.get_mem0_client", lambda: DummyMem0Client())
 
-    agent = BaseAgent(name="TradingAgent", system_prompt="You are helpful.")
+    agent = BaseAgent(name="TradingAgent", system_prompt="You are helpful.", scope_id="scope-1")
 
     response = asyncio.run(agent.process("Help me prepare execution"))
 
@@ -430,7 +549,7 @@ def test_base_agent_executes_chart_pipeline_nodes(monkeypatch):
     monkeypatch.setattr(BaseAgent, "_route_intent", fake_route_intent)
     monkeypatch.setattr("agents.core.base.tool_registry.execute", fake_execute)
 
-    agent = BaseAgent(name="TradingAgent", system_prompt="You are helpful.")
+    agent = BaseAgent(name="TradingAgent", system_prompt="You are helpful.", scope_id="scope-1")
 
     response = asyncio.run(agent.process("Analyze the BTC chart with RSI", use_tools=True))
 
@@ -459,11 +578,100 @@ def test_base_agent_executes_chart_pipeline_nodes(monkeypatch):
     assert "tv_add_indicator" in tool_names
 
 
+def test_base_agent_executes_risk_review_pipeline_nodes(monkeypatch):
+    monkeypatch.setattr("agents.core.base.Anthropic", DummyAnthropic)
+    monkeypatch.setattr("agents.core.base.AsyncAnthropic", DummyAsyncAnthropic)
+    monkeypatch.setattr("agents.core.base.get_mem0_client", lambda: DummyMem0Client())
+    register_trading_tools()
+
+    async def fake_route_intent(self, user_input, history, market_context=None):
+        return AgentIntentContext(
+            intent="market_analysis",
+            confidence="high",
+            analysis_mode="technical",
+            analysis_scope="risk_review",
+            preferred_tool_groups=["market", "chart", "ui"],
+            indicator_preference="indicator_light",
+        )
+
+    state = {"symbol": "BTC", "timeframe": "60", "indicators": []}
+
+    async def fake_execute(name, arguments):
+        if name == "tv_get_state":
+            return SimpleNamespace(success=True, data={"data": dict(state)}, error=None)
+        if name == "tv_add_indicator":
+            state["indicators"].append({"name": arguments["indicator"], "entity_id": "rsi-1"})
+            return SimpleNamespace(success=True, data={"entity_id": "rsi-1"}, error=None)
+        if name == "tv_get_quote":
+            return SimpleNamespace(success=True, data={"data": {"symbol": "BTC", "price": 65000}}, error=None)
+        if name == "tv_get_indicator_values":
+            return SimpleNamespace(success=True, data={"data": {"RSI": 74.2}}, error=None)
+        if name == "get_price":
+            return SimpleNamespace(
+                success=True,
+                data={"success": True, "symbol": "BTC", "price": 65000, "change_24h": 2.1},
+                error=None,
+            )
+        if name == "search_news_by_symbols":
+            return SimpleNamespace(
+                success=True,
+                data={
+                    "success": True,
+                    "results": {
+                        "BTC": [
+                            {
+                                "title": "Bitcoin sees fresh catalyst",
+                                "source": "MockWire",
+                                "date": "2026-04-19T00:00:00+00:00",
+                                "detected_at": "2026-04-19T00:05:00+00:00",
+                                "is_new": True,
+                            }
+                        ]
+                    },
+                },
+                error=None,
+            )
+        raise AssertionError(f"Unexpected tool call: {name}")
+
+    monkeypatch.setattr(BaseAgent, "_route_intent", fake_route_intent)
+    monkeypatch.setattr("agents.core.base.tool_registry.execute", fake_execute)
+
+    agent = BaseAgent(name="TradingAgent", system_prompt="You are helpful.", scope_id="scope-1")
+    response = asyncio.run(agent.process("Review BTC risk and invalidation", use_tools=True))
+
+    assert response == "Pipeline response ok"
+    assert [node.name for node in agent.last_pipeline_trace.pipeline_nodes] == [
+        PIPELINE_NODE_CHART_ANALYSIS,
+        PIPELINE_NODE_MARKET_SNAPSHOT,
+        PIPELINE_NODE_RISK_REVIEW,
+        PIPELINE_NODE_RESPONSE_COMPOSER,
+    ]
+    assert agent.last_pipeline_trace.pipeline_nodes[2].status == "completed"
+    assert "Pipeline node instruction (risk_review):" in agent.client.messages.calls[0]["system"]
+    assert "Internal risk-review node observations:" in agent.client.messages.calls[0]["system"]
+    assert "Internal response-composer node observations:" in agent.client.messages.calls[0]["system"]
+    assert agent.last_pipeline_trace.pipeline_nodes[3].metadata["recommended_posture"] in {"balanced", "cautious", "risk_first"}
+
+
 def test_base_agent_executes_chart_write_inside_same_node(monkeypatch):
     monkeypatch.setattr("agents.core.base.Anthropic", DummyAnthropic)
     monkeypatch.setattr("agents.core.base.AsyncAnthropic", DummyAsyncAnthropic)
     monkeypatch.setattr("agents.core.base.get_mem0_client", lambda: DummyMem0Client())
     register_trading_tools()
+    persisted = []
+
+    class DummyArtifactService:
+        def record_artifact(self, **kwargs):
+            artifact = {
+                "artifact_id": "artifact-1",
+                "created_at": "2026-04-19T00:00:00+00:00",
+                "expires_at": "2026-04-26T00:00:00+00:00",
+                **kwargs,
+            }
+            persisted.append(artifact)
+            return artifact
+
+    monkeypatch.setattr("agents.core.base.get_pipeline_artifact_service", lambda: DummyArtifactService())
 
     async def fake_route_intent(self, user_input, history, market_context=None):
         return AgentIntentContext(
@@ -501,7 +709,7 @@ def test_base_agent_executes_chart_write_inside_same_node(monkeypatch):
     monkeypatch.setattr(BaseAgent, "_route_intent", fake_route_intent)
     monkeypatch.setattr("agents.core.base.tool_registry.execute", fake_execute)
 
-    agent = BaseAgent(name="TradingAgent", system_prompt="You are helpful.")
+    agent = BaseAgent(name="TradingAgent", system_prompt="You are helpful.", scope_id="scope-1")
 
     response = asyncio.run(agent.process("Clear drawings and mark support at 65000 on BTC 4h", use_tools=True))
 
@@ -516,6 +724,9 @@ def test_base_agent_executes_chart_write_inside_same_node(monkeypatch):
     assert "tv_draw_horizontal_line" in calls
     assert "tv_capture_screenshot" in calls
     assert "tv_add_indicator" not in calls
+    assert agent.last_pipeline_artifacts[0]["artifact_id"] == "artifact-1"
+    assert agent.last_pipeline_trace.artifacts[0]["artifact_id"] == "artifact-1"
+    assert persisted[0]["kind"] == "chart_write_screenshot"
     tool_names = {tool["name"] for tool in agent.client.messages.calls[0]["tools"]}
     assert tool_names == {"show_hint", "show_plan", "show_thinking_summary"}
     assert "Pipeline node instruction (chart_analysis):" in agent.client.messages.calls[0]["system"]
@@ -591,6 +802,7 @@ def test_base_agent_executes_execution_pipeline_nodes(monkeypatch):
     ]
     assert agent.last_pipeline_trace.next_agent_status == "represented_by_pipeline_nodes"
     assert "Pipeline node instruction (execution_snapshot):" in agent.client.messages.calls[0]["system"]
+    assert agent.last_pipeline_trace.pipeline_nodes[1].metadata["recommended_posture"] == "direct"
 
 
 def test_base_agent_executes_memory_pipeline_nodes(monkeypatch):

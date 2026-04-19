@@ -1,8 +1,8 @@
 import pytest
 
 from agents.core.graph_executor import AgentNodeExecutionContext
-from agents.core.pipeline import AgentPipelineNodePlan
-from agents.intent_router import AgentIntentContext
+from agents.pipeline.pipeline import AgentPipelineNodePlan
+from agents.pipeline.intent_router import AgentIntentContext
 from agents.nodes.general_fallback import run_general_fallback_node
 
 

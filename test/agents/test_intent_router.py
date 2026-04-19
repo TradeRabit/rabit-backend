@@ -1,4 +1,4 @@
-from agents.intent_router import AgentIntentContext, build_intent_prompt, parse_intent_response
+from agents.pipeline.intent_router import AgentIntentContext, build_intent_prompt, parse_intent_response
 from agents.tools import ToolDefinition, ToolParameter, ToolRegistry
 
 

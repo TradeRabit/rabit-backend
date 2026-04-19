@@ -5,7 +5,7 @@ import json
 from typing import Dict
 
 from agents.core.graph_executor import AgentNodeExecutionContext, AgentPipelineNodeResult
-from agents.core.pipeline import AgentPipelineNodePlan
+from agents.pipeline.pipeline import AgentPipelineNodePlan
 
 
 def _build_prompt_addition(summary: Dict[str, object]) -> str:
@@ -28,6 +28,7 @@ async def run_general_fallback_node(
         "confidence": getattr(intent_context, "confidence", "low"),
         "routing_reason": getattr(intent_context, "routing_reason", ""),
         "goal_summary": getattr(intent_context, "goal_summary", ""),
+        "retryable": False,
     }
     return AgentPipelineNodeResult(
         status="completed",

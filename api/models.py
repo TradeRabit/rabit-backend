@@ -443,6 +443,31 @@ class OpenRouterSessionCostResponse(BaseModel):
     updated_at: Optional[str] = None
 
 
+class AgentPipelineArtifactResponse(BaseModel):
+    """One persisted pipeline artifact for a chat/session scope."""
+
+    artifact_id: str
+    scope_id: str
+    user_id: Optional[str] = None
+    node_name: str
+    kind: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+    expires_at: str
+
+
+class AgentPipelineArtifactListResponse(BaseModel):
+    """Persisted pipeline artifacts for one scope_id."""
+
+    scope_id: str
+    user_id: Optional[str] = None
+    artifacts: List[AgentPipelineArtifactResponse] = Field(default_factory=list)
+    total: int = 0
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 class AgentChatResponse(BaseModel):
     """Response body for multimodal agent chat."""
 
