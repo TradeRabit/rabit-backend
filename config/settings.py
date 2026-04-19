@@ -21,6 +21,15 @@ class Settings:
         "OPENROUTER_SESSION_COST_DB_PATH",
         "data/openrouter_session_costs.json",
     )
+    MONITORING_COST_DB_PATH = os.getenv(
+        "MONITORING_COST_DB_PATH",
+        "data/monitoring_costs.json",
+    )
+    ALERT_SETUP_COST_USD = float(os.getenv("ALERT_SETUP_COST_USD", "0.001"))
+    MONITORING_COST_PER_SYMBOL_HOUR_USD = float(
+        os.getenv("MONITORING_COST_PER_SYMBOL_HOUR_USD", "0.002")
+    )
+    ALERT_TRIGGER_COST_USD = float(os.getenv("ALERT_TRIGGER_COST_USD", "0.0005"))
     
     # Drift Protocol
     DRIFT_RPC_URL = os.getenv("DRIFT_RPC_URL", "https://api.mainnet-beta.solana.com")

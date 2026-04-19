@@ -263,7 +263,7 @@ def register_trading_tools():
     # Register add_price_alert
     tool_registry.register(ToolDefinition(
         name="add_price_alert",
-        description="Add price alert for validation/invalidation monitoring. Perfect for trade setups - get notified when price validates (confirms) or invalidates (rejects) your trade idea. For LONG: validation_price > current > invalidation_price. For SHORT: validation_price < current < invalidation_price. Choose exchange: drift (default), backpack, or binance.",
+        description="Add price alert for validation/invalidation monitoring. Perfect for trade setups - get notified when price validates (confirms) or invalidates (rejects) your trade idea. When triggered, Rabit emits a structured price_alert_triggered event with a reusable default_prompt for frontend notifications or chat prefill. For LONG: validation_price > current > invalidation_price. For SHORT: validation_price < current < invalidation_price. Choose exchange: drift (default), backpack, or binance.",
         parameters=[
             ToolParameter(
                 name="symbol",
@@ -293,6 +293,24 @@ def register_trading_tools():
                 name="exchange",
                 type="string",
                 description="Exchange to monitor: drift (default), backpack, or binance",
+                required=False
+            ),
+            ToolParameter(
+                name="trade_label",
+                type="string",
+                description="Optional user-facing label such as 'Trade A' or 'SOL breakout setup' used in automatic alert prompts",
+                required=False
+            ),
+            ToolParameter(
+                name="trade_id",
+                type="string",
+                description="Optional trade reference ID included in the triggered alert payload",
+                required=False
+            ),
+            ToolParameter(
+                name="setup_id",
+                type="string",
+                description="Optional setup reference ID included in the triggered alert payload",
                 required=False
             )
         ],

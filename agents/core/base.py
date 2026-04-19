@@ -17,6 +17,7 @@ from agents.pipeline.conversation_style import (
     normalize_conversation_style,
 )
 from agents.openrouter import get_openrouter_session_cost_service
+from agents.service_costs import get_monitoring_cost_service
 from agents.pipeline.intent_router import AgentIntentContext, build_intent_prompt, parse_intent_response
 from agents.pipeline.artifacts import get_pipeline_artifact_service
 from agents.drift_execution import (
@@ -36,11 +37,13 @@ from agents.tools.core.runtime_context import (
     reset_current_drift_execution,
     reset_current_event_emitter,
     reset_current_market_context,
+    reset_current_scope_id,
     reset_current_user_id,
     set_current_backpack_execution,
     set_current_drift_execution,
     set_current_event_emitter,
     set_current_market_context,
+    set_current_scope_id,
     set_current_user_id,
 )
 from agents.uploads import AgentAttachment
@@ -106,6 +109,7 @@ class BaseAgent:
 
         self.memory = ConversationMemory()
         self.session_costs = get_openrouter_session_cost_service()
+        self.monitoring_costs = get_monitoring_cost_service()
         self.pipeline_artifacts = get_pipeline_artifact_service()
         self.compressor = ConversationCompressor(
             max_tokens=max_tokens,
@@ -121,6 +125,7 @@ class BaseAgent:
         self.last_drift_execution = normalize_drift_execution(None)
         self.last_pipeline_artifacts: List[Dict[str, Any]] = []
         self.last_session_cost_summary: Optional[Dict[str, Any]] = None
+        self.last_service_cost_summary: Optional[Dict[str, Any]] = None
         self.last_pipeline_trace: Optional[AgentPipelineTrace] = None
         self.last_safe_error_message: Optional[str] = None
         self.graph_executor = build_default_graph_executor()
@@ -275,6 +280,7 @@ class BaseAgent:
         )
 
         user_token = set_current_user_id(self.user_id)
+        scope_token = set_current_scope_id(self.scope_id)
         backpack_execution_token = set_current_backpack_execution(self.last_backpack_execution)
         drift_execution_token = set_current_drift_execution(self.last_drift_execution)
         market_context_token = set_current_market_context(self.last_market_context)
@@ -304,6 +310,7 @@ class BaseAgent:
             reset_current_market_context(market_context_token)
             reset_current_drift_execution(drift_execution_token)
             reset_current_backpack_execution(backpack_execution_token)
+            reset_current_scope_id(scope_token)
             reset_current_user_id(user_token)
 
         degraded_nodes = [node.name for node in pipeline.pipeline_nodes if node.status in {"degraded", "failed"}]
@@ -502,6 +509,7 @@ class BaseAgent:
                 response_text = self._extract_response_text(response)
 
             self.last_session_cost_summary = self._get_session_cost_summary()
+            self.last_service_cost_summary = self._get_service_cost_summary()
             self._update_pipeline_stage(
                 "execution",
                 status="completed",
@@ -534,6 +542,8 @@ class BaseAgent:
                 summary="Returned a safe fallback response instead of a raw error.",
             )
             self._finalize_pipeline("degraded")
+            self.last_session_cost_summary = self._get_session_cost_summary()
+            self.last_service_cost_summary = self._get_service_cost_summary()
             if self.last_pipeline_trace:
                 self.last_pipeline_trace.mark_fallback(
                     "safe_error_response",
@@ -614,6 +624,7 @@ class BaseAgent:
                 )
 
             self.last_session_cost_summary = self._get_session_cost_summary()
+            self.last_service_cost_summary = self._get_service_cost_summary()
             self._update_pipeline_stage(
                 "execution",
                 status="completed",
@@ -645,6 +656,8 @@ class BaseAgent:
                 summary="Streaming ended with a fallback-safe error state.",
             )
             self._finalize_pipeline("failed")
+            self.last_session_cost_summary = self._get_session_cost_summary()
+            self.last_service_cost_summary = self._get_service_cost_summary()
             if self.last_pipeline_trace:
                 self.last_pipeline_trace.mark_fallback(
                     "safe_stream_error",
@@ -674,6 +687,7 @@ class BaseAgent:
             allowed_names=self._get_effective_allowed_tool_names(intent_context)
         )
         user_token = set_current_user_id(self.user_id)
+        scope_token = set_current_scope_id(self.scope_id)
         backpack_execution_token = set_current_backpack_execution(self.last_backpack_execution)
         drift_execution_token = set_current_drift_execution(self.last_drift_execution)
         market_context_token = set_current_market_context(self.last_market_context)
@@ -755,6 +769,7 @@ class BaseAgent:
             reset_current_market_context(market_context_token)
             reset_current_drift_execution(drift_execution_token)
             reset_current_backpack_execution(backpack_execution_token)
+            reset_current_scope_id(scope_token)
             reset_current_user_id(user_token)
 
     async def _process_with_tools_stream(
@@ -779,6 +794,7 @@ class BaseAgent:
             allowed_names=self._get_effective_allowed_tool_names(intent_context)
         )
         user_token = set_current_user_id(self.user_id)
+        scope_token = set_current_scope_id(self.scope_id)
         backpack_execution_token = set_current_backpack_execution(self.last_backpack_execution)
         drift_execution_token = set_current_drift_execution(self.last_drift_execution)
         market_context_token = set_current_market_context(self.last_market_context)
@@ -855,6 +871,7 @@ class BaseAgent:
             reset_current_market_context(market_context_token)
             reset_current_drift_execution(drift_execution_token)
             reset_current_backpack_execution(backpack_execution_token)
+            reset_current_scope_id(scope_token)
             reset_current_user_id(user_token)
 
     async def _stream_model_round(
@@ -1136,6 +1153,7 @@ class BaseAgent:
                 phase=phase,
             )
             self.last_session_cost_summary = summary
+            self.last_service_cost_summary = self._get_service_cost_summary()
             return summary
         except Exception as exc:
             logger.warning(f"Failed to record OpenRouter session cost usage: {exc}")
@@ -1150,6 +1168,56 @@ class BaseAgent:
         except Exception as exc:
             logger.warning(f"Failed to load OpenRouter session cost summary: {exc}")
             return None
+
+    def _get_service_cost_summary(self) -> Optional[Dict[str, Any]]:
+        """Return the latest combined model and monitoring cost summary for this scope."""
+        if not self.scope_id:
+            return None
+
+        model_summary = self._get_session_cost_summary()
+        try:
+            monitor_summary = self.monitoring_costs.get_scope_summary(scope_id=self.scope_id)
+        except Exception as exc:
+            logger.warning(f"Failed to load monitoring cost summary: {exc}")
+            monitor_summary = None
+
+        if not model_summary and not monitor_summary:
+            return None
+
+        currency = "USD"
+        created_at = None
+        updated_at = None
+        if model_summary:
+            currency = model_summary.get("currency", currency)
+            created_at = model_summary.get("created_at")
+            updated_at = model_summary.get("updated_at")
+        if monitor_summary:
+            currency = monitor_summary.get("currency", currency)
+            created_at = min(
+                [value for value in [created_at, monitor_summary.get("created_at")] if value],
+                default=created_at or monitor_summary.get("created_at"),
+            )
+            updated_at = max(
+                [value for value in [updated_at, monitor_summary.get("updated_at")] if value],
+                default=updated_at or monitor_summary.get("updated_at"),
+            )
+
+        return {
+            "scope_id": self.scope_id,
+            "user_id": self.user_id or (model_summary or {}).get("user_id") or (monitor_summary or {}).get("user_id"),
+            "currency": currency,
+            "model_cost_usd": round(float((model_summary or {}).get("estimated_cost_usd") or 0.0), 10),
+            "monitor_cost_usd": round(float((monitor_summary or {}).get("total_cost_usd") or 0.0), 10),
+            "total_cost_usd": round(
+                float((model_summary or {}).get("estimated_cost_usd") or 0.0)
+                + float((monitor_summary or {}).get("total_cost_usd") or 0.0),
+                10,
+            ),
+            "session_cost": model_summary,
+            "monitoring_cost": monitor_summary,
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
 
     def _extract_usage_payload(self, response: Any) -> Optional[Dict[str, Any]]:
         """Extract usage metrics from Anthropic/OpenRouter response objects."""

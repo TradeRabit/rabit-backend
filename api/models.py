@@ -443,6 +443,41 @@ class OpenRouterSessionCostResponse(BaseModel):
     updated_at: Optional[str] = None
 
 
+class MonitoringCostSummaryResponse(BaseModel):
+    """Accumulated monitoring cost for one scope_id session."""
+
+    scope_id: str
+    user_id: Optional[str] = None
+    currency: str = "USD"
+    alert_setup_cost_usd: float = 0.0
+    trigger_cost_usd: float = 0.0
+    monitoring_cost_usd: float = 0.0
+    total_cost_usd: float = 0.0
+    alert_setup_count: int = 0
+    trigger_count: int = 0
+    active_alert_count: int = 0
+    active_symbol_count: int = 0
+    active_symbols: List[str] = Field(default_factory=list)
+    total_symbol_hours: float = 0.0
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ServiceCostSummaryResponse(BaseModel):
+    """Combined backend service cost for one scope_id session."""
+
+    scope_id: str
+    user_id: Optional[str] = None
+    currency: str = "USD"
+    model_cost_usd: float = 0.0
+    monitor_cost_usd: float = 0.0
+    total_cost_usd: float = 0.0
+    session_cost: Optional[OpenRouterSessionCostResponse] = None
+    monitoring_cost: Optional[MonitoringCostSummaryResponse] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
 class AgentPipelineArtifactResponse(BaseModel):
     """One persisted pipeline artifact for a chat/session scope."""
 
@@ -483,6 +518,7 @@ class AgentChatResponse(BaseModel):
     intent: Optional[Dict[str, Any]] = None
     agent_pipeline: Optional[Dict[str, Any]] = None
     session_cost: Optional[OpenRouterSessionCostResponse] = None
+    service_cost: Optional[ServiceCostSummaryResponse] = None
 
 
 class ExchangeConnectionCreateRequest(BaseModel):

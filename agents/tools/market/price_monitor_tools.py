@@ -1,5 +1,8 @@
 """Price monitoring tools for trading agent"""
 from typing import Dict, Any, List, Optional
+
+from agents.service_costs import get_monitoring_cost_service
+from agents.tools.core.runtime_context import get_current_scope_id, get_current_user_id
 from ws.price.monitor import get_price_monitor
 from utils.logger import get_logger
 
@@ -11,7 +14,10 @@ async def add_price_alert(
     validation_price: float,
     invalidation_price: float,
     direction: str = "LONG",
-    exchange: str = "drift"
+    exchange: str = "drift",
+    trade_label: Optional[str] = None,
+    trade_id: Optional[str] = None,
+    setup_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Add price alert for validation/invalidation monitoring
@@ -24,6 +30,9 @@ async def add_price_alert(
             - LONG: validation_price > current > invalidation_price
             - SHORT: validation_price < current < invalidation_price
         exchange: Exchange to monitor - "drift", "backpack", or "binance" (default: "drift")
+        trade_label: Optional human-friendly label like "Trade A" or "SOL breakout setup"
+        trade_id: Optional trade reference ID
+        setup_id: Optional setup reference ID
     
     Returns:
         Alert details with alert_id
@@ -87,6 +96,8 @@ async def add_price_alert(
         
         # Get monitor
         monitor = get_price_monitor()
+        current_scope_id = get_current_scope_id()
+        current_user_id = get_current_user_id()
         
         # Add alert with exchange info
         alert_id = monitor.add_alert(
@@ -94,25 +105,47 @@ async def add_price_alert(
             validation_price=validation_price,
             invalidation_price=invalidation_price,
             direction=direction.upper(),
-            exchange=exchange
+            exchange=exchange,
+            trade_label=trade_label,
+            trade_id=trade_id,
+            setup_id=setup_id,
+            scope_id=current_scope_id,
+            user_id=current_user_id,
+        )
+        monitoring_cost = (
+            get_monitoring_cost_service().get_scope_summary(scope_id=current_scope_id)
+            if current_scope_id
+            else None
         )
         
         # Get current price
         current_price = monitor.get_current_price(symbol)
         
         logger.info(f"Added price alert: {symbol} {direction} on {exchange} | Val: {validation_price} | Inval: {invalidation_price}")
-        
+
+        trade_reference = trade_label or setup_id or trade_id or f"{symbol} {direction.upper()} setup"
+
         return {
             "success": True,
             "alert_id": alert_id,
             "symbol": symbol,
             "direction": direction.upper(),
             "exchange": exchange,
+            "trade_label": trade_label,
+            "trade_id": trade_id,
+            "setup_id": setup_id,
             "validation_price": validation_price,
             "invalidation_price": invalidation_price,
             "current_price": current_price,
+            "scope_id": current_scope_id,
+            "user_id": current_user_id,
             "message": f"Price alert added for {symbol} {direction.upper()} setup on {exchange}",
-            "monitoring": f"Will alert when price reaches ${validation_price:,.2f} (validation) or ${invalidation_price:,.2f} (invalidation)"
+            "monitoring": f"Will alert when price reaches ${validation_price:,.2f} (validation) or ${invalidation_price:,.2f} (invalidation)",
+            "default_prompts": {
+                "validation": f"{trade_reference} hit validation price at ${validation_price:,.2f} on {exchange.upper()} for {symbol}.",
+                "invalidation": f"{trade_reference} hit invalidation price at ${invalidation_price:,.2f} on {exchange.upper()} for {symbol}.",
+            },
+            "monitor_cost": monitoring_cost,
         }
     
     except ValueError as e:
@@ -149,7 +182,11 @@ async def remove_price_alert(alert_id: str) -> Dict[str, Any]:
             }
         
         monitor = get_price_monitor()
-        removed = monitor.remove_alert(alert_id)
+        removed = monitor.remove_alert(
+            alert_id,
+            scope_id=get_current_scope_id(),
+            user_id=get_current_user_id(),
+        )
         
         if removed:
             logger.info(f"Removed price alert: {alert_id}")
@@ -185,7 +222,11 @@ async def list_price_alerts(active_only: bool = False) -> Dict[str, Any]:
     """
     try:
         monitor = get_price_monitor()
-        alerts = monitor.list_alerts(active_only=active_only)
+        alerts = monitor.list_alerts(
+            active_only=active_only,
+            scope_id=get_current_scope_id(),
+            user_id=get_current_user_id(),
+        )
         
         # Separate by status
         active = [a for a in alerts if not a["triggered"]]
@@ -233,7 +274,11 @@ async def get_price_alert(alert_id: str) -> Dict[str, Any]:
             }
         
         monitor = get_price_monitor()
-        alert = monitor.get_alert(alert_id)
+        alert = monitor.get_alert(
+            alert_id,
+            scope_id=get_current_scope_id(),
+            user_id=get_current_user_id(),
+        )
         
         if alert:
             return {
@@ -264,11 +309,20 @@ async def get_price_monitor_stats() -> Dict[str, Any]:
     """
     try:
         monitor = get_price_monitor()
-        stats = monitor.get_stats()
+        stats = monitor.get_stats(
+            scope_id=get_current_scope_id(),
+            user_id=get_current_user_id(),
+        )
+        monitoring_cost = (
+            get_monitoring_cost_service().get_scope_summary(scope_id=get_current_scope_id())
+            if get_current_scope_id()
+            else None
+        )
         
         return {
             "success": True,
             "stats": stats,
+            "monitor_cost": monitoring_cost,
             "summary": f"Monitor is {'running' if stats['running'] else 'stopped'} with {stats['active_alerts']} active alerts"
         }
     

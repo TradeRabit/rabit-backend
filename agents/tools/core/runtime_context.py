@@ -3,6 +3,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 from contextvars import ContextVar, Token
 
 _current_user_id: ContextVar[Optional[str]] = ContextVar("current_user_id", default=None)
+_current_scope_id: ContextVar[Optional[str]] = ContextVar("current_scope_id", default=None)
 _current_event_emitter: ContextVar[
     Optional[Callable[[str, dict], Awaitable[None]]]
 ] = ContextVar("current_event_emitter", default=None)
@@ -33,6 +34,21 @@ def reset_current_user_id(token: Token) -> None:
 def get_current_user_id() -> Optional[str]:
     """Return the active user ID for the current request context."""
     return _current_user_id.get()
+
+
+def set_current_scope_id(scope_id: Optional[str]) -> Token:
+    """Set the current scope ID for tool execution."""
+    return _current_scope_id.set(scope_id)
+
+
+def reset_current_scope_id(token: Token) -> None:
+    """Reset the current scope ID after tool execution finishes."""
+    _current_scope_id.reset(token)
+
+
+def get_current_scope_id() -> Optional[str]:
+    """Return the active scope ID for the current request context."""
+    return _current_scope_id.get()
 
 
 def set_current_event_emitter(

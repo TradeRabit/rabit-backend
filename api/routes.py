@@ -41,6 +41,7 @@ from agents.pipeline.market_context import normalize_market_context
 from agents.memory import Mem0DisabledError, Mem0RequestError, get_mem0_client
 from agents.openrouter import get_openrouter_session_cost_service
 from agents.pipeline.artifacts import get_pipeline_artifact_service
+from agents.service_costs import get_monitoring_cost_service
 from agents.pipeline.trading_style import normalize_trading_style
 from agents.tools_registry import register_trading_tools
 from agents.uploads import UploadValidationError, get_upload_manager
@@ -91,7 +92,9 @@ from api.models import (
     MemoryDeleteResponse,
     MemoryHealthResponse,
     MemoryListResponse,
+    MonitoringCostSummaryResponse,
     OpenRouterSessionCostResponse,
+    ServiceCostSummaryResponse,
     SupportedTradingAssetsResponse,
     TrendingAssetItem,
     TrendingAssetsResponse,
@@ -281,6 +284,69 @@ def _serialize_drift_execution(config: Optional[dict]) -> dict:
 def _serialize_session_cost(summary: Optional[dict]) -> Optional[dict]:
     """Return session-cost payloads unchanged when present."""
     return summary or None
+
+
+def _serialize_monitoring_cost(summary: Optional[dict]) -> Optional[dict]:
+    """Return monitoring-cost payloads unchanged when present."""
+    return summary or None
+
+
+def _build_service_cost_summary(
+    *,
+    scope_id: Optional[str],
+    user_id: Optional[str] = None,
+    session_cost: Optional[dict] = None,
+    monitoring_cost: Optional[dict] = None,
+) -> Optional[dict]:
+    """Build a combined service-cost payload for one scope."""
+    normalized_scope_id = str(scope_id or "").strip()
+    if not normalized_scope_id:
+        return None
+
+    model_summary = session_cost
+    if model_summary is None:
+        model_summary = get_openrouter_session_cost_service().get_scope_summary(scope_id=normalized_scope_id)
+
+    monitor_summary = monitoring_cost
+    if monitor_summary is None:
+        monitor_summary = get_monitoring_cost_service().get_scope_summary(scope_id=normalized_scope_id)
+
+    if not model_summary and not monitor_summary:
+        return None
+
+    created_at_candidates = [
+        value
+        for value in [
+            (model_summary or {}).get("created_at"),
+            (monitor_summary or {}).get("created_at"),
+        ]
+        if value
+    ]
+    updated_at_candidates = [
+        value
+        for value in [
+            (model_summary or {}).get("updated_at"),
+            (monitor_summary or {}).get("updated_at"),
+        ]
+        if value
+    ]
+
+    return {
+        "scope_id": normalized_scope_id,
+        "user_id": (model_summary or {}).get("user_id") or (monitor_summary or {}).get("user_id") or user_id,
+        "currency": (model_summary or {}).get("currency") or (monitor_summary or {}).get("currency") or "USD",
+        "model_cost_usd": round(float((model_summary or {}).get("estimated_cost_usd") or 0.0), 10),
+        "monitor_cost_usd": round(float((monitor_summary or {}).get("total_cost_usd") or 0.0), 10),
+        "total_cost_usd": round(
+            float((model_summary or {}).get("estimated_cost_usd") or 0.0)
+            + float((monitor_summary or {}).get("total_cost_usd") or 0.0),
+            10,
+        ),
+        "session_cost": model_summary,
+        "monitoring_cost": monitor_summary,
+        "created_at": min(created_at_candidates) if created_at_candidates else None,
+        "updated_at": max(updated_at_candidates) if updated_at_candidates else None,
+    }
 
 
 def _raise_drift_execution_http_error(exc: Exception) -> None:
@@ -520,7 +586,7 @@ async def get_execution_access_status(
 @router.get(
     "/openrouter/session-costs/{scope_id}",
     response_model=OpenRouterSessionCostResponse,
-    tags=["Models"],
+    tags=["Service Cost"],
     summary="Return accumulated OpenRouter session cost for one scope",
 )
 async def get_openrouter_session_cost(
@@ -558,6 +624,49 @@ async def get_openrouter_session_cost(
         )
 
     return OpenRouterSessionCostResponse(**summary)
+
+
+@router.get(
+    "/service-costs/{scope_id}",
+    response_model=ServiceCostSummaryResponse,
+    tags=["Service Cost"],
+    summary="Return combined model and monitoring service cost for one scope",
+)
+async def get_service_cost(
+    scope_id: str,
+    user_id: Optional[str] = Query(
+        None,
+        description="Optional explicit user ID when no bearer token is available",
+    ),
+    authorization: Optional[str] = Header(default=None),
+):
+    """Return one scope_id's combined model and monitoring cost summary."""
+    auth_user = _get_authenticated_user(authorization)
+    resolved_user_id = _resolve_request_user_id(
+        provided_user_id=user_id,
+        auth_user=auth_user,
+    )
+    if not resolved_user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated user or explicit user_id is required for service cost access.",
+        )
+
+    summary = _build_service_cost_summary(scope_id=scope_id, user_id=resolved_user_id)
+    if not summary:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No service cost summary found for scope_id '{scope_id}'.",
+        )
+
+    owner_user_id = summary.get("user_id")
+    if owner_user_id and owner_user_id != resolved_user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Requested scope_id does not belong to the authenticated user.",
+        )
+
+    return ServiceCostSummaryResponse(**summary)
 
 
 @router.get(
@@ -1923,6 +2032,16 @@ async def chat_with_agent(
             session_cost=_serialize_session_cost(
                 getattr(agent, "last_session_cost_summary", None)
             ),
+            service_cost=_build_service_cost_summary(
+                scope_id=request.scope_id,
+                user_id=resolved_user_id,
+                session_cost=getattr(agent, "last_session_cost_summary", None),
+                monitoring_cost=(
+                    getattr(agent, "last_service_cost_summary", {}) or {}
+                ).get("monitoring_cost")
+                if getattr(agent, "last_service_cost_summary", None)
+                else None,
+            ),
         )
     except UploadValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2014,6 +2133,16 @@ async def stream_chat_with_agent(
                         "session_cost": _serialize_session_cost(
                             getattr(agent, "last_session_cost_summary", None)
                         ),
+                        "service_cost": _build_service_cost_summary(
+                            scope_id=request.scope_id,
+                            user_id=resolved_user_id,
+                            session_cost=getattr(agent, "last_session_cost_summary", None),
+                            monitoring_cost=(
+                                getattr(agent, "last_service_cost_summary", {}) or {}
+                            ).get("monitoring_cost")
+                            if getattr(agent, "last_service_cost_summary", None)
+                            else None,
+                        ),
                     },
                 )
             except UploadValidationError as exc:
@@ -2062,6 +2191,16 @@ async def stream_chat_with_agent(
                         "agent_pipeline": _serialize_agent_pipeline(agent),
                         "session_cost": _serialize_session_cost(
                             getattr(agent, "last_session_cost_summary", None)
+                        ),
+                        "service_cost": _build_service_cost_summary(
+                            scope_id=request.scope_id,
+                            user_id=resolved_user_id,
+                            session_cost=getattr(agent, "last_session_cost_summary", None),
+                            monitoring_cost=(
+                                getattr(agent, "last_service_cost_summary", {}) or {}
+                            ).get("monitoring_cost")
+                            if getattr(agent, "last_service_cost_summary", None)
+                            else None,
                         ),
                     },
                 )
@@ -2114,6 +2253,16 @@ async def stream_chat_with_agent(
                         "agent_pipeline": _serialize_agent_pipeline(agent),
                         "session_cost": _serialize_session_cost(
                             getattr(agent, "last_session_cost_summary", None)
+                        ),
+                        "service_cost": _build_service_cost_summary(
+                            scope_id=request.scope_id,
+                            user_id=resolved_user_id,
+                            session_cost=getattr(agent, "last_session_cost_summary", None),
+                            monitoring_cost=(
+                                getattr(agent, "last_service_cost_summary", {}) or {}
+                            ).get("monitoring_cost")
+                            if getattr(agent, "last_service_cost_summary", None)
+                            else None,
                         ),
                     },
                 )

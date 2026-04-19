@@ -115,6 +115,27 @@ class DummySessionCostService:
         }
 
 
+class DummyMonitoringCostService:
+    def get_scope_summary(self, *, scope_id):
+        return {
+            "scope_id": scope_id,
+            "user_id": "wallet:user-1",
+            "currency": "USD",
+            "alert_setup_cost_usd": 0.001,
+            "trigger_cost_usd": 0.0005,
+            "monitoring_cost_usd": 0.004,
+            "total_cost_usd": 0.0055,
+            "alert_setup_count": 1,
+            "trigger_count": 1,
+            "active_alert_count": 0,
+            "active_symbol_count": 0,
+            "active_symbols": [],
+            "total_symbol_hours": 2.0,
+            "created_at": "2026-04-18T00:00:00+00:00",
+            "updated_at": "2026-04-18T00:01:00+00:00",
+        }
+
+
 def make_attachment(tmp_path: Path, filename: str, content_type: str, kind: str, payload: bytes):
     file_path = tmp_path / filename
     file_path.write_bytes(payload)
@@ -291,11 +312,13 @@ def test_base_agent_injects_mem0_context_into_system_prompt(monkeypatch):
 
 def test_base_agent_tracks_openrouter_session_costs(monkeypatch):
     dummy_costs = DummySessionCostService()
+    dummy_monitoring_costs = DummyMonitoringCostService()
 
     monkeypatch.setattr("agents.core.base.Anthropic", DummyAnthropic)
     monkeypatch.setattr("agents.core.base.AsyncAnthropic", DummyAsyncAnthropic)
     monkeypatch.setattr("agents.core.base.get_mem0_client", lambda: DummyMem0Client())
     monkeypatch.setattr("agents.core.base.get_openrouter_session_cost_service", lambda: dummy_costs)
+    monkeypatch.setattr("agents.core.base.get_monitoring_cost_service", lambda: dummy_monitoring_costs)
     monkeypatch.setattr("agents.core.base.settings.USE_OPENROUTER", True)
     monkeypatch.setattr("agents.core.base.settings.OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet")
 
@@ -314,6 +337,9 @@ def test_base_agent_tracks_openrouter_session_costs(monkeypatch):
     assert dummy_costs.calls[0]["user_id"] == "wallet:user-1"
     assert agent.last_session_cost_summary is not None
     assert agent.last_session_cost_summary["scope_id"] == "chat-cost-1"
+    assert agent.last_service_cost_summary is not None
+    assert agent.last_service_cost_summary["model_cost_usd"] == 0.00123
+    assert agent.last_service_cost_summary["monitor_cost_usd"] == 0.0055
 
 
 def test_base_agent_formats_tradingview_screenshot_tool_result(monkeypatch):
