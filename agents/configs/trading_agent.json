@@ -19,7 +19,7 @@
     "max_concurrent_monitors": 5
   },
   "defaults": {
-    "exchange": "drift",
+    "exchange": "phantom",
     "poll_interval": 10,
     "news_poll_interval": 300
   }

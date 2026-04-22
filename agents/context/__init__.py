@@ -15,14 +15,10 @@ Usage:
     )
     
     # Set full context
-    context = set_trading_context(
-        exchange="drift",
-        asset="BTC",
-        mode="asset_locked"
-    )
+    context = set_trading_context(exchange="phantom", asset="BTC", mode="asset_locked")
     
     # Update only exchange
-    context = update_exchange("backpack")
+    context = update_exchange("spot")
     
     # Get context for agent prompt
     context_str = get_context_for_agent()

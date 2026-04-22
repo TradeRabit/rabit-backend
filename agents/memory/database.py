@@ -59,6 +59,11 @@ class ConversationDatabase:
             metadata: Optional metadata (title, created_at, etc.)
         """
         try:
+            existing_metadata = dict(self.data.get(scope_id, {}).get("metadata", {}) or {})
+            merged_metadata = {
+                **existing_metadata,
+                **(metadata or {}),
+            }
             session_data = {
                 "scope_id": scope_id,
                 "messages": [
@@ -69,7 +74,7 @@ class ConversationDatabase:
                     }
                     for msg in messages
                 ],
-                "metadata": metadata or {},
+                "metadata": merged_metadata,
                 "updated_at": datetime.utcnow().isoformat()
             }
             
@@ -124,8 +129,42 @@ class ConversationDatabase:
             del self.data[scope_id]
             self.save()
             logger.info(f"Deleted session: {scope_id}")
-    
-    def list_sessions(self) -> List[Dict]:
+
+    def get_session_record(self, scope_id: str) -> Optional[Dict]:
+        """Return the raw stored session payload."""
+        session = self.data.get(scope_id)
+        if session is None:
+            return None
+        return dict(session)
+
+    def build_session_summary(self, scope_id: str, session_data: Dict) -> Dict:
+        """Build one consistent session summary dict."""
+        metadata = session_data.get("metadata", {}) or {}
+        messages = session_data.get("messages", []) or []
+
+        title = metadata.get("title")
+        if not title and messages:
+            for msg in messages:
+                if msg.get("role") == "user":
+                    content = str(msg.get("content") or "")
+                    title = content[:50] + ("..." if len(content) > 50 else "")
+                    break
+
+        return {
+            "scope_id": scope_id,
+            "title": title or "Untitled",
+            "message_count": len(messages),
+            "created_at": metadata.get("created_at"),
+            "updated_at": session_data.get("updated_at"),
+            "last_message": str(messages[-1].get("content") or "")[:100] if messages else None,
+            "user_id": metadata.get("user_id"),
+            "scope_mode": metadata.get("scope_mode"),
+            "symbol": metadata.get("symbol"),
+            "exchange": metadata.get("exchange"),
+            "source_screen": metadata.get("source_screen"),
+        }
+
+    def list_sessions(self, user_id: Optional[str] = None) -> List[Dict]:
         """
         List all conversation sessions
         
@@ -134,25 +173,10 @@ class ConversationDatabase:
         """
         sessions = []
         for scope_id, session_data in self.data.items():
-            metadata = session_data.get("metadata", {})
-            messages = session_data.get("messages", [])
-            
-            # Get first user message as title if no title set
-            title = metadata.get("title")
-            if not title and messages:
-                for msg in messages:
-                    if msg["role"] == "user":
-                        title = msg["content"][:50] + ("..." if len(msg["content"]) > 50 else "")
-                        break
-            
-            sessions.append({
-                "scope_id": scope_id,
-                "title": title or "Untitled",
-                "message_count": len(messages),
-                "created_at": metadata.get("created_at"),
-                "updated_at": session_data.get("updated_at"),
-                "last_message": messages[-1]["content"][:100] if messages else None
-            })
+            summary = self.build_session_summary(scope_id, session_data)
+            if user_id and summary.get("user_id") != user_id:
+                continue
+            sessions.append(summary)
         
         # Sort by updated_at (most recent first)
         sessions.sort(key=lambda x: x.get("updated_at", ""), reverse=True)

@@ -31,18 +31,6 @@ class Settings:
     )
     ALERT_TRIGGER_COST_USD = float(os.getenv("ALERT_TRIGGER_COST_USD", "0.0005"))
     
-    # Drift Protocol
-    DRIFT_RPC_URL = os.getenv("DRIFT_RPC_URL", "https://api.mainnet-beta.solana.com")
-    DRIFT_PROGRAM_ID = os.getenv("DRIFT_PROGRAM_ID", "dRiftyHA39MWEi3m9aunc5MzRF1JYJjb5ciH7N27eNn")
-    DRIFT_EXECUTION_ENABLED = os.getenv("DRIFT_EXECUTION_ENABLED", "false").lower() == "true"
-    DRIFT_EXECUTION_REQUESTS_DB_PATH = os.getenv(
-        "DRIFT_EXECUTION_REQUESTS_DB_PATH",
-        "data/drift_execution_requests.json",
-    )
-    DRIFT_EXECUTION_PREPARE_TTL_SECONDS = int(
-        os.getenv("DRIFT_EXECUTION_PREPARE_TTL_SECONDS", "900")
-    )
-    
     # WebSocket
     WS_HOST = os.getenv("WS_HOST", "0.0.0.0")
     WS_PORT = int(os.getenv("WS_PORT", "8000"))
@@ -50,31 +38,15 @@ class Settings:
     # Trading Assets (used by all WS sources)
     TRADING_ASSETS = os.getenv("TRADING_ASSETS", "BTC,ETH,SOL,DOGE,BNB,SUI,APT,ARB,RENDER,XRP,INJ,LINK,PYTH,JTO,AVAX,WIF,JUP,TAO,KMNO,TNSR,DRIFT,RAY,HYPE,LTC,FARTCOIN").split(",")
     
-    # Drift WebSocket
-    DRIFT_WS_URL = os.getenv("DRIFT_WS_URL", "wss://data.api.drift.trade/ws")
-    DRIFT_DLOB_WS_URL = os.getenv("DRIFT_DLOB_WS_URL", "wss://dlob.drift.trade/ws")
-    DRIFT_SUBSCRIBE_ASSETS = int(os.getenv("DRIFT_SUBSCRIBE_ASSETS", "25"))
-    # Use TRADING_ASSETS for Drift (backward compatibility)
-    DRIFT_ASSETS = TRADING_ASSETS
-    
-    # Backpack Exchange
-    BACKPACK_API_URL = os.getenv("BACKPACK_API_URL", "https://api.backpack.exchange")
-    BACKPACK_API_KEY = os.getenv("BACKPACK_API_KEY", "").strip()
-    BACKPACK_API_SECRET = os.getenv("BACKPACK_API_SECRET", "").strip()
-    BACKPACK_WS_URL = os.getenv("BACKPACK_WS_URL", "wss://ws.backpack.exchange")
-    BACKPACK_ENABLED = os.getenv("BACKPACK_ENABLED", "true").lower() == "true"
-    BACKPACK_EXECUTION_ENABLED = os.getenv("BACKPACK_EXECUTION_ENABLED", "false").lower() == "true"
-    BACKPACK_QUOTE_ASSET = os.getenv("BACKPACK_QUOTE_ASSET", "USDC")  # SOL_USDC, BTC_USDC
-    BACKPACK_SUBSCRIBE_ASSETS = int(os.getenv("BACKPACK_SUBSCRIBE_ASSETS", "25"))
-    
-    # Price Source Selection
-    PRICE_SOURCE = os.getenv("PRICE_SOURCE", "backpack")  # "drift", "backpack", or "both"
-    
-    # Binance Configuration
-    BINANCE_API_URL = os.getenv("BINANCE_API_URL", "https://api.binance.com")
-    BINANCE_WS_URL = os.getenv("BINANCE_WS_URL", "wss://stream.binance.com:9443/ws")
-    BINANCE_OHLC_INTERVAL = os.getenv("BINANCE_OHLC_INTERVAL", "1h")
-    BINANCE_OHLC_DOWNLOAD_LIMIT = int(os.getenv("BINANCE_OHLC_DOWNLOAD_LIMIT", "100"))
+    # Phantom market data surface backed by Hyperliquid
+    PHANTOM_ENABLED = os.getenv("PHANTOM_ENABLED", "true").lower() == "true"
+    PHANTOM_PRICE_POLL_INTERVAL_SECONDS = float(
+        os.getenv("PHANTOM_PRICE_POLL_INTERVAL_SECONDS", "5")
+    )
+    HYPERLIQUID_API_URL = os.getenv("HYPERLIQUID_API_URL", "https://api.hyperliquid.xyz")
+    HYPERLIQUID_WS_URL = os.getenv("HYPERLIQUID_WS_URL", "wss://api.hyperliquid.xyz/ws")
+    HYPERLIQUID_DEX = os.getenv("HYPERLIQUID_DEX", "").strip()
+    PRICE_SOURCE = os.getenv("PRICE_SOURCE", "phantom")
     
     # Data Configuration
     WS_DATA_FIELDS = os.getenv("WS_DATA_FIELDS", "price,change_24h,volume_24h,open_interest,funding_rate").split(",")
@@ -110,19 +82,53 @@ class Settings:
     NEWS_IS_NEW_WINDOW_SECONDS = int(
         os.getenv("NEWS_IS_NEW_WINDOW_SECONDS", "86400")
     )
-
-    # Exchange connection storage
-    EXCHANGE_CONNECTIONS_DB_PATH = os.getenv(
-        "EXCHANGE_CONNECTIONS_DB_PATH",
-        "data/exchange_connections.json",
-    )
-    EXCHANGE_CREDENTIALS_MASTER_KEY = os.getenv(
-        "EXCHANGE_CREDENTIALS_MASTER_KEY",
-        "",
-    ).strip()
     TRADE_DEBRIEF_DB_PATH = os.getenv(
         "TRADE_DEBRIEF_DB_PATH",
         "data/trade_debriefs.json",
+    )
+    USER_PROFILES_DB_PATH = os.getenv(
+        "USER_PROFILES_DB_PATH",
+        "data/user_profiles.json",
+    )
+
+    # Rabit on-chain contract
+    RABIT_CONTRACT_CLUSTER = os.getenv("RABIT_CONTRACT_CLUSTER", "devnet").strip().lower()
+    RABIT_CONTRACT_RPC_URL = os.getenv("RABIT_CONTRACT_RPC_URL", "").strip()
+    RABIT_CONTRACT_PROGRAM_ID = os.getenv("RABIT_CONTRACT_PROGRAM_ID", "").strip()
+    RABIT_AI_USAGE_PAYMENT_MINT = os.getenv("RABIT_AI_USAGE_PAYMENT_MINT", "").strip()
+    RABIT_AI_USAGE_PAYMENT_TOKEN_SYMBOL = os.getenv("RABIT_AI_USAGE_PAYMENT_TOKEN_SYMBOL", "USDC").strip() or "USDC"
+    RABIT_AI_USAGE_PAYMENT_MINT_DECIMALS = int(
+        os.getenv("RABIT_AI_USAGE_PAYMENT_MINT_DECIMALS", "6")
+    )
+    RABIT_AI_USAGE_PAYMENT_TOKEN_USD_PRICE = float(
+        os.getenv("RABIT_AI_USAGE_PAYMENT_TOKEN_USD_PRICE", "1.0")
+    )
+    RABIT_AI_USAGE_PLATFORM_FEE_BPS = int(
+        os.getenv("RABIT_AI_USAGE_PLATFORM_FEE_BPS", "500")
+    )
+    RABIT_AI_USAGE_DEFAULT_MARKUP_BPS = int(
+        os.getenv("RABIT_AI_USAGE_DEFAULT_MARKUP_BPS", "500")
+    )
+    RABIT_AI_USAGE_DEFAULT_USAGE_TYPE = (
+        os.getenv("RABIT_AI_USAGE_DEFAULT_USAGE_TYPE", "text").strip().lower() or "text"
+    )
+    RABIT_AI_USAGE_CHAT_MIN_BALANCE_USD = float(
+        os.getenv("RABIT_AI_USAGE_CHAT_MIN_BALANCE_USD", "1.0")
+    )
+    RABIT_AI_USAGE_ENFORCE_CHAT_BALANCE = os.getenv(
+        "RABIT_AI_USAGE_ENFORCE_CHAT_BALANCE",
+        "true",
+    ).lower() == "true"
+    RABIT_AI_USAGE_DELEGATION_EXPIRY_SECONDS = int(
+        os.getenv("RABIT_AI_USAGE_DELEGATION_EXPIRY_SECONDS", "2592000")
+    )
+    RABIT_AI_USAGE_DELEGATION_SPENDING_LIMIT_UNITS = int(
+        os.getenv("RABIT_AI_USAGE_DELEGATION_SPENDING_LIMIT_UNITS", "1000000000")
+    )
+    RABIT_CONTRACT_BACKEND_SIGNER = os.getenv("RABIT_CONTRACT_BACKEND_SIGNER", "").strip()
+    RABIT_AI_USAGE_SETTLEMENTS_DB_PATH = os.getenv(
+        "RABIT_AI_USAGE_SETTLEMENTS_DB_PATH",
+        "data/ai_usage_settlements.json",
     )
 
     # Mobile wallet auth
@@ -145,21 +151,13 @@ class Settings:
         Resolve PRICE_SOURCE into concrete WebSocket sources.
 
         Supported values:
-        - "backpack"
-        - "drift"
-        - "both" -> backpack + drift
+        - "phantom"
         """
-        price_source = (self.PRICE_SOURCE or "backpack").strip().lower()
+        price_source = (self.PRICE_SOURCE or "phantom").strip().lower()
+        sources = ["phantom"] if price_source == "phantom" else []
 
-        if price_source == "both":
-            sources = ["backpack", "drift"]
-        elif price_source in {"backpack", "drift"}:
-            sources = [price_source]
-        else:
-            sources = ["backpack"]
-
-        if "backpack" in sources and not self.BACKPACK_ENABLED:
-            sources = [source for source in sources if source != "backpack"]
+        if "phantom" in sources and not self.PHANTOM_ENABLED:
+            sources = [source for source in sources if source != "phantom"]
 
         return sources
 

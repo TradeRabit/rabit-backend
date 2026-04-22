@@ -43,33 +43,22 @@ async def run_execution_snapshot_node(
         )
 
     errors: List[str] = []
-    backpack_context = dict(getattr(context.agent, "last_backpack_execution", {}) or {})
-    drift_context = dict(getattr(context.agent, "last_drift_execution", {}) or {})
-    execution_gate_enabled = bool(backpack_context.get("enabled")) or bool(drift_context.get("enabled"))
+    execution_gate = dict(getattr(context.agent, "last_execution_gate", {}) or {})
+    execution_gate_enabled = bool(execution_gate.get("enabled"))
     sections: Dict[str, Any] = {
-        "backpack_execution": backpack_context,
-        "drift_execution": drift_context,
+        "execution_gate": execution_gate,
     }
-    loop_actions: List[str] = []
-
-    for tool_name in ("backpack_get_open_orders", "drift_get_open_orders"):
-        ok, payload, error = await _call_required_tool(context, tool_name, {})
-        loop_actions.append(tool_name)
-        if ok:
-            sections[tool_name] = payload
-        elif error:
-            errors.append(f"{tool_name}: {error}")
 
     summary_payload = {
         "execution_sections": sections,
         "loop_trace": [
             {
                 "phase": "Reason-Act-Critique-Observe",
-                "reason": "Gather execution readiness and open-order state before the final response.",
-                "actions": loop_actions,
-                "critique": "The node stayed read-only and focused on readiness plus current order state.",
+                "reason": "Gather execution readiness before the final response.",
+                "actions": ["execution_gate"],
+                "critique": "The node stayed read-only and focused on whether live execution is currently allowed.",
                 "observe": {
-                    "successful_sections": sorted(k for k in sections.keys() if k.endswith("open_orders")),
+                    "successful_sections": sorted(sections.keys()),
                     "error_count": len(errors),
                     "execution_gate_enabled": execution_gate_enabled,
                 },
@@ -80,14 +69,12 @@ async def run_execution_snapshot_node(
         "retryable": bool(errors),
     }
 
-    status = "completed" if len(sections) > 2 and not errors else "degraded"
-    if len(sections) == 2 and errors:
-        status = "degraded"
+    status = "completed" if not errors else "degraded"
 
     return AgentPipelineNodeResult(
         status=status,
         summary=(
-            "Execution snapshot node gathered readiness state and open orders."
+            "Execution snapshot node gathered current live-execution readiness."
             if status == "completed"
             else "Execution snapshot node gathered partial execution context."
         ),

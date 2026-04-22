@@ -7,12 +7,8 @@ _current_scope_id: ContextVar[Optional[str]] = ContextVar("current_scope_id", de
 _current_event_emitter: ContextVar[
     Optional[Callable[[str, dict], Awaitable[None]]]
 ] = ContextVar("current_event_emitter", default=None)
-_current_backpack_execution: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
-    "current_backpack_execution",
-    default=None,
-)
-_current_drift_execution: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
-    "current_drift_execution",
+_current_execution_gate: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "current_execution_gate",
     default=None,
 )
 _current_market_context: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
@@ -68,34 +64,19 @@ def get_current_event_emitter() -> Optional[Callable[[str, dict], Awaitable[None
     return _current_event_emitter.get()
 
 
-def set_current_backpack_execution(config: Optional[Dict[str, Any]]) -> Token:
-    """Set the current Backpack execution config for tool execution."""
-    return _current_backpack_execution.set(config)
+def set_current_execution_gate(config: Optional[Dict[str, Any]]) -> Token:
+    """Set the current generic execution gate for tool execution."""
+    return _current_execution_gate.set(config)
 
 
-def reset_current_backpack_execution(token: Token) -> None:
-    """Reset the current Backpack execution config."""
-    _current_backpack_execution.reset(token)
+def reset_current_execution_gate(token: Token) -> None:
+    """Reset the current generic execution gate."""
+    _current_execution_gate.reset(token)
 
 
-def get_current_backpack_execution() -> Optional[Dict[str, Any]]:
-    """Return the active Backpack execution config for the current request context."""
-    return _current_backpack_execution.get()
-
-
-def set_current_drift_execution(config: Optional[Dict[str, Any]]) -> Token:
-    """Set the current Drift execution config for tool execution."""
-    return _current_drift_execution.set(config)
-
-
-def reset_current_drift_execution(token: Token) -> None:
-    """Reset the current Drift execution config."""
-    _current_drift_execution.reset(token)
-
-
-def get_current_drift_execution() -> Optional[Dict[str, Any]]:
-    """Return the active Drift execution config for the current request context."""
-    return _current_drift_execution.get()
+def get_current_execution_gate() -> Optional[Dict[str, Any]]:
+    """Return the active generic execution gate for the current request context."""
+    return _current_execution_gate.get()
 
 
 def set_current_market_context(config: Optional[Dict[str, Any]]) -> Token:

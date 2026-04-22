@@ -29,12 +29,7 @@ from agents.tools.memory.mem0_tools import (
     delete_user_memory,
     get_user_memory,
 )
-from agents.tools.backpack_execution import register_backpack_execution_tools
 from agents.tools.decision_support import register_decision_support_tools
-from agents.tools.drift_execution import (
-    register_drift_execution_tools,
-    register_drift_readonly_tools,
-)
 from agents.tools.ui.ui_stream_tools import show_hint, show_plan, show_thinking_summary
 
 logger = get_logger(__name__)
@@ -86,12 +81,25 @@ async def get_price(symbol: str) -> dict:
         "price": price_update.price,
         "change_24h": price_update.change_24h,
         "volume_24h": price_update.volume_24h,
+        "notional_volume_24h": price_update.notional_volume_24h,
+        "base_volume_24h": price_update.base_volume_24h,
         "high_24h": price_update.high_24h,
         "low_24h": price_update.low_24h,
         "market_cap": price_update.market_cap,
         "fdv": price_update.fdv,
         "open_interest": price_update.open_interest,
         "funding_rate": price_update.funding_rate,
+        "oracle_price": price_update.oracle_price,
+        "premium": price_update.premium,
+        "circulating_supply": price_update.circulating_supply,
+        "total_supply": price_update.total_supply,
+        "max_leverage": price_update.max_leverage,
+        "only_isolated": price_update.only_isolated,
+        "market_pair": price_update.market_pair,
+        "full_name": price_update.full_name,
+        "token_index": price_update.token_index,
+        "is_canonical": price_update.is_canonical,
+        "source_exchange": price_update.source_exchange,
         "timestamp": price_update.timestamp.isoformat()
     }
 
@@ -263,7 +271,7 @@ def register_trading_tools():
     # Register add_price_alert
     tool_registry.register(ToolDefinition(
         name="add_price_alert",
-        description="Add price alert for validation/invalidation monitoring. Perfect for trade setups - get notified when price validates (confirms) or invalidates (rejects) your trade idea. When triggered, Rabit emits a structured price_alert_triggered event with a reusable default_prompt for frontend notifications or chat prefill. For LONG: validation_price > current > invalidation_price. For SHORT: validation_price < current < invalidation_price. Choose exchange: drift (default), backpack, or binance.",
+        description="Add price alert for validation/invalidation monitoring. Perfect for trade setups - get notified when price validates (confirms) or invalidates (rejects) your trade idea. When triggered, Rabit emits a structured price_alert_triggered event with a reusable default_prompt for frontend notifications or chat prefill. For LONG: validation_price > current > invalidation_price. For SHORT: validation_price < current < invalidation_price. Choose exchange: phantom futures (default) or phantom spot.",
         parameters=[
             ToolParameter(
                 name="symbol",
@@ -292,7 +300,7 @@ def register_trading_tools():
             ToolParameter(
                 name="exchange",
                 type="string",
-                description="Exchange to monitor: drift (default), backpack, or binance",
+                description="Exchange to monitor: phantom futures (default) or phantom spot",
                 required=False
             ),
             ToolParameter(
@@ -385,15 +393,6 @@ def register_trading_tools():
         parameters=[],
         function=stop_price_monitor
     ))
-
-    # ===== BACKPACK ACCOUNT / EXECUTION TOOLS =====
-
-    register_backpack_execution_tools()
-
-    # ===== DRIFT PUBLIC READ-ONLY TOOLS =====
-
-    register_drift_readonly_tools()
-    register_drift_execution_tools()
 
     # ===== DECISION SUPPORT TOOLS =====
 
@@ -538,6 +537,5 @@ def register_trading_tools():
         "Registered trading tools with gates: "
         f"web_search={'on' if settings.WEB_SEARCH_ENABLED else 'off'}, "
         f"memory_tools={'on' if settings.MEMORY_TOOLS_ENABLED else 'off'}, "
-        f"backpack_execution={'on' if settings.BACKPACK_EXECUTION_ENABLED else 'off'}, "
-        f"drift_execution={'on' if settings.DRIFT_EXECUTION_ENABLED else 'off'}"
+        "live_execution=off (legacy execution tools removed)"
     )

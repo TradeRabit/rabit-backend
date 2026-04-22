@@ -14,7 +14,7 @@ async def add_price_alert(
     validation_price: float,
     invalidation_price: float,
     direction: str = "LONG",
-    exchange: str = "drift",
+    exchange: str = "phantom",
     trade_label: Optional[str] = None,
     trade_id: Optional[str] = None,
     setup_id: Optional[str] = None,
@@ -29,7 +29,7 @@ async def add_price_alert(
         direction: Trade direction - LONG or SHORT
             - LONG: validation_price > current > invalidation_price
             - SHORT: validation_price < current < invalidation_price
-        exchange: Exchange to monitor - "drift", "backpack", or "binance" (default: "drift")
+        exchange: Exchange to monitor - "phantom", "spot", or "futures" (default: "phantom")
         trade_label: Optional human-friendly label like "Trade A" or "SOL breakout setup"
         trade_id: Optional trade reference ID
         setup_id: Optional setup reference ID
@@ -39,10 +39,10 @@ async def add_price_alert(
         
     Example:
         # LONG setup: BTC breaks above 95000 (validation) or below 90000 (invalidation)
-        add_price_alert("BTC", validation_price=95000, invalidation_price=90000, direction="LONG", exchange="drift")
+        add_price_alert("BTC", validation_price=95000, invalidation_price=90000, direction="LONG", exchange="phantom")
         
         # SHORT setup: ETH breaks below 3000 (validation) or above 3200 (invalidation)
-        add_price_alert("ETH", validation_price=3000, invalidation_price=3200, direction="SHORT", exchange="backpack")
+        add_price_alert("ETH", validation_price=3000, invalidation_price=3200, direction="SHORT", exchange="spot")
     """
     try:
         # Validate inputs
@@ -57,17 +57,22 @@ async def add_price_alert(
         symbol = symbol.upper().strip()
         
         # Validate exchange
-        valid_exchanges = ["drift", "backpack", "binance"]
+        exchange_aliases = {
+            "phantom": "phantom",
+            "futures": "futures",
+            "spot": "spot",
+        }
+        valid_exchanges = list(exchange_aliases.keys())
         if exchange.lower() not in valid_exchanges:
             return {
                 "success": False,
                 "error": f"Invalid exchange: '{exchange}'",
                 "provided": exchange,
                 "valid_options": valid_exchanges,
-                "suggestion": "Use 'drift', 'backpack', or 'binance'"
+                "suggestion": "Use 'phantom', 'spot', or 'futures'"
             }
         
-        exchange = exchange.lower()
+        exchange = exchange_aliases[exchange.lower()]
         
         # Validate direction
         if direction.upper() not in ["LONG", "SHORT"]:

@@ -34,8 +34,8 @@ class TradingAgent(BaseAgent):
         conversation_style: str = CONVERSATION_STYLE_NORMAL,
         trading_style: str = TRADING_STYLE_BALANCED,
         market_context: Optional[Dict[str, Any]] = None,
-        backpack_execution: Optional[Dict[str, Any]] = None,
-        drift_execution: Optional[Dict[str, Any]] = None,
+        execution_gate: Optional[Dict[str, Any]] = None,
+        tool_preferences: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Process trading-related query with tool support
@@ -46,8 +46,8 @@ class TradingAgent(BaseAgent):
             conversation_style: Requested frontend response style
             trading_style: Requested frontend trading-analysis style
             market_context: Frontend market scope and market-state context
-            backpack_execution: Frontend Backpack live execution gate
-            drift_execution: Frontend Drift live execution gate
+            execution_gate: Frontend live execution gate for Phantom-first runtime
+            tool_preferences: Frontend toggles for web search, memory, planning, and auto execution
             
         Returns:
             Agent response
@@ -59,6 +59,6 @@ class TradingAgent(BaseAgent):
             conversation_style=conversation_style,
             trading_style=trading_style,
             market_context=market_context,
-            backpack_execution=backpack_execution,
-            drift_execution=drift_execution,
+            execution_gate=execution_gate,
+            tool_preferences=tool_preferences,
         )

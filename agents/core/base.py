@@ -6,26 +6,28 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from anthropic import Anthropic, AsyncAnthropic
 
-from agents.backpack_execution import (
-    get_backpack_execution_guidance,
-    normalize_backpack_execution,
-)
 from agents.compression import ConversationCompressor
 from agents.pipeline.conversation_style import (
     CONVERSATION_STYLE_NORMAL,
     get_conversation_style_guidance,
     normalize_conversation_style,
 )
+from agents.pipeline.execution_gate import (
+    get_execution_gate_guidance,
+    merge_legacy_execution_gates,
+    normalize_execution_gate,
+)
 from agents.openrouter import get_openrouter_session_cost_service
 from agents.service_costs import get_monitoring_cost_service
 from agents.pipeline.intent_router import AgentIntentContext, build_intent_prompt, parse_intent_response
 from agents.pipeline.artifacts import get_pipeline_artifact_service
-from agents.drift_execution import (
-    get_drift_execution_guidance,
-    normalize_drift_execution,
-)
 from agents.memory import ConversationMemory, Mem0Error, Message, get_mem0_client
 from agents.pipeline.market_context import get_market_context_guidance, normalize_market_context
+from agents.pipeline.tool_preferences import (
+    get_blocked_tool_names,
+    get_tool_preferences_guidance,
+    normalize_tool_preferences,
+)
 from agents.core.graph_executor import (
     AgentNodeExecutionContext,
     build_default_graph_executor,
@@ -33,15 +35,13 @@ from agents.core.graph_executor import (
 from agents.pipeline.pipeline import AgentPipelineTrace, build_pipeline_trace
 from agents.tools import ToolResult, tool_registry
 from agents.tools.core.runtime_context import (
-    reset_current_backpack_execution,
-    reset_current_drift_execution,
     reset_current_event_emitter,
+    reset_current_execution_gate,
     reset_current_market_context,
     reset_current_scope_id,
     reset_current_user_id,
-    set_current_backpack_execution,
-    set_current_drift_execution,
     set_current_event_emitter,
+    set_current_execution_gate,
     set_current_market_context,
     set_current_scope_id,
     set_current_user_id,
@@ -121,8 +121,8 @@ class BaseAgent:
         self.last_conversation_style = CONVERSATION_STYLE_NORMAL
         self.last_trading_style = TRADING_STYLE_BALANCED
         self.last_market_context = normalize_market_context(None)
-        self.last_backpack_execution = normalize_backpack_execution(None)
-        self.last_drift_execution = normalize_drift_execution(None)
+        self.last_execution_gate = normalize_execution_gate(None)
+        self.last_tool_preferences = normalize_tool_preferences(None)
         self.last_pipeline_artifacts: List[Dict[str, Any]] = []
         self.last_session_cost_summary: Optional[Dict[str, Any]] = None
         self.last_service_cost_summary: Optional[Dict[str, Any]] = None
@@ -172,20 +172,20 @@ class BaseAgent:
         conversation_style: str,
         trading_style: str,
         market_context: Optional[Dict[str, Any]],
-        backpack_execution: Optional[Dict[str, Any]],
-        drift_execution: Optional[Dict[str, Any]],
+        execution_gate: Optional[Dict[str, Any]],
+        tool_preferences: Optional[Dict[str, Any]],
     ) -> Tuple[str, List[Dict[str, Any]], AgentIntentContext, str]:
         """Normalize inputs, route intent, and build a pipeline-ready prompt."""
         conversation_style = normalize_conversation_style(conversation_style)
         trading_style = normalize_trading_style(trading_style)
         market_context = normalize_market_context(market_context)
-        backpack_execution = normalize_backpack_execution(backpack_execution)
-        drift_execution = normalize_drift_execution(drift_execution)
+        execution_gate = merge_legacy_execution_gates(execution_gate=execution_gate)
+        tool_preferences = normalize_tool_preferences(tool_preferences)
         self.last_conversation_style = conversation_style
         self.last_trading_style = trading_style
         self.last_market_context = market_context
-        self.last_backpack_execution = backpack_execution
-        self.last_drift_execution = drift_execution
+        self.last_execution_gate = execution_gate
+        self.last_tool_preferences = tool_preferences
         self.last_pipeline_artifacts = []
         self.last_safe_error_message = None
 
@@ -202,8 +202,7 @@ class BaseAgent:
             intent_context=intent_context,
             user_input=user_input,
             market_context=market_context,
-            backpack_execution=backpack_execution,
-            drift_execution=drift_execution,
+            execution_gate=execution_gate,
         )
 
         effective_system_prompt = await self._build_effective_system_prompt(
@@ -212,8 +211,8 @@ class BaseAgent:
             conversation_style,
             trading_style,
             market_context,
-            backpack_execution,
-            drift_execution,
+            execution_gate,
+            tool_preferences,
         )
 
         messages = list(history)
@@ -225,6 +224,11 @@ class BaseAgent:
 
     async def _execute_tool_for_node(self, tool_name: str, arguments: Dict[str, Any]) -> ToolResult:
         """Execute one tool on behalf of a pipeline node with shared failure tracking."""
+        if tool_name in get_blocked_tool_names(self.last_tool_preferences):
+            return ToolResult(
+                success=False,
+                error=f"Tool '{tool_name}' is disabled by the current assist settings.",
+            )
         result = await tool_registry.execute(tool_name, arguments)
         if not result.success and self.last_pipeline_trace is not None:
             self.last_pipeline_trace.record_tool_failure(
@@ -281,8 +285,7 @@ class BaseAgent:
 
         user_token = set_current_user_id(self.user_id)
         scope_token = set_current_scope_id(self.scope_id)
-        backpack_execution_token = set_current_backpack_execution(self.last_backpack_execution)
-        drift_execution_token = set_current_drift_execution(self.last_drift_execution)
+        execution_gate_token = set_current_execution_gate(self.last_execution_gate)
         market_context_token = set_current_market_context(self.last_market_context)
         emitter_token = set_current_event_emitter(event_emitter) if event_emitter else None
 
@@ -308,8 +311,7 @@ class BaseAgent:
             if emitter_token is not None:
                 reset_current_event_emitter(emitter_token)
             reset_current_market_context(market_context_token)
-            reset_current_drift_execution(drift_execution_token)
-            reset_current_backpack_execution(backpack_execution_token)
+            reset_current_execution_gate(execution_gate_token)
             reset_current_scope_id(scope_token)
             reset_current_user_id(user_token)
 
@@ -392,6 +394,17 @@ class BaseAgent:
         if blocked_names:
             effective_names.difference_update(blocked_names)
 
+        blocked_by_preferences = get_blocked_tool_names(self.last_tool_preferences)
+        if effective_names is None:
+            if not blocked_by_preferences:
+                return None
+            return {
+                tool.name
+                for tool in tool_registry.list_tools()
+                if tool.name not in blocked_by_preferences
+            }
+
+        effective_names.difference_update(blocked_by_preferences)
         return effective_names
 
     def _finalize_pipeline(self, status: str) -> None:
@@ -448,8 +461,8 @@ class BaseAgent:
         conversation_style: str = CONVERSATION_STYLE_NORMAL,
         trading_style: str = TRADING_STYLE_BALANCED,
         market_context: Optional[Dict[str, Any]] = None,
-        backpack_execution: Optional[Dict[str, Any]] = None,
-        drift_execution: Optional[Dict[str, Any]] = None,
+        execution_gate: Optional[Dict[str, Any]] = None,
+        tool_preferences: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Process user input with auto-compression and optional multimodal attachments.
@@ -476,8 +489,8 @@ class BaseAgent:
             conversation_style=conversation_style,
             trading_style=trading_style,
             market_context=market_context,
-            backpack_execution=backpack_execution,
-            drift_execution=drift_execution,
+            execution_gate=execution_gate,
+            tool_preferences=tool_preferences,
         )
 
         try:
@@ -562,8 +575,8 @@ class BaseAgent:
         conversation_style: str = CONVERSATION_STYLE_NORMAL,
         trading_style: str = TRADING_STYLE_BALANCED,
         market_context: Optional[Dict[str, Any]] = None,
-        backpack_execution: Optional[Dict[str, Any]] = None,
-        drift_execution: Optional[Dict[str, Any]] = None,
+        execution_gate: Optional[Dict[str, Any]] = None,
+        tool_preferences: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Process user input and emit streaming UI/text events.
@@ -591,8 +604,8 @@ class BaseAgent:
             conversation_style=conversation_style,
             trading_style=trading_style,
             market_context=market_context,
-            backpack_execution=backpack_execution,
-            drift_execution=drift_execution,
+            execution_gate=execution_gate,
+            tool_preferences=tool_preferences,
         )
 
         try:
@@ -688,8 +701,7 @@ class BaseAgent:
         )
         user_token = set_current_user_id(self.user_id)
         scope_token = set_current_scope_id(self.scope_id)
-        backpack_execution_token = set_current_backpack_execution(self.last_backpack_execution)
-        drift_execution_token = set_current_drift_execution(self.last_drift_execution)
+        execution_gate_token = set_current_execution_gate(self.last_execution_gate)
         market_context_token = set_current_market_context(self.last_market_context)
 
         try:
@@ -767,8 +779,7 @@ class BaseAgent:
             return self._extract_response_text(response)
         finally:
             reset_current_market_context(market_context_token)
-            reset_current_drift_execution(drift_execution_token)
-            reset_current_backpack_execution(backpack_execution_token)
+            reset_current_execution_gate(execution_gate_token)
             reset_current_scope_id(scope_token)
             reset_current_user_id(user_token)
 
@@ -795,8 +806,7 @@ class BaseAgent:
         )
         user_token = set_current_user_id(self.user_id)
         scope_token = set_current_scope_id(self.scope_id)
-        backpack_execution_token = set_current_backpack_execution(self.last_backpack_execution)
-        drift_execution_token = set_current_drift_execution(self.last_drift_execution)
+        execution_gate_token = set_current_execution_gate(self.last_execution_gate)
         market_context_token = set_current_market_context(self.last_market_context)
         emitter_token = set_current_event_emitter(event_emitter)
 
@@ -869,8 +879,7 @@ class BaseAgent:
         finally:
             reset_current_event_emitter(emitter_token)
             reset_current_market_context(market_context_token)
-            reset_current_drift_execution(drift_execution_token)
-            reset_current_backpack_execution(backpack_execution_token)
+            reset_current_execution_gate(execution_gate_token)
             reset_current_scope_id(scope_token)
             reset_current_user_id(user_token)
 
@@ -1025,16 +1034,16 @@ class BaseAgent:
         conversation_style: str = CONVERSATION_STYLE_NORMAL,
         trading_style: str = TRADING_STYLE_BALANCED,
         market_context: Optional[Dict[str, Any]] = None,
-        backpack_execution: Optional[Dict[str, Any]] = None,
-        drift_execution: Optional[Dict[str, Any]] = None,
+        execution_gate: Optional[Dict[str, Any]] = None,
+        tool_preferences: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Append long-term memory and intent guidance to the system prompt."""
         intent_context = intent_context or AgentIntentContext.fallback()
         normalized_style = normalize_conversation_style(conversation_style)
         normalized_trading_style = normalize_trading_style(trading_style)
         normalized_market_context = normalize_market_context(market_context)
-        normalized_backpack_execution = normalize_backpack_execution(backpack_execution)
-        normalized_drift_execution = normalize_drift_execution(drift_execution)
+        normalized_execution_gate = normalize_execution_gate(execution_gate)
+        normalized_tool_preferences = normalize_tool_preferences(tool_preferences)
         base_prompt = (
             f"{self.system_prompt}\n\n"
             "Current routing context:\n"
@@ -1057,8 +1066,8 @@ class BaseAgent:
             f"- conversation_style: {normalized_style}\n"
             f"- trading_style: {normalized_trading_style}\n"
             f"- market_context: {json.dumps(normalized_market_context, ensure_ascii=False)}\n"
-            f"- backpack_execution: {json.dumps(normalized_backpack_execution, ensure_ascii=False)}\n"
-            f"- drift_execution: {json.dumps(normalized_drift_execution, ensure_ascii=False)}\n"
+            f"- execution_gate: {json.dumps(normalized_execution_gate, ensure_ascii=False)}\n"
+            f"- tool_preferences: {json.dumps(normalized_tool_preferences, ensure_ascii=False)}\n"
             f"- next_agent_target: "
             f"{getattr(self.last_pipeline_trace, 'selected_next_agent', 'general_specialist')}\n"
             f"- architecture_mode: "
@@ -1070,8 +1079,8 @@ class BaseAgent:
             f"- style_guidance: {get_conversation_style_guidance(normalized_style)}\n"
             f"- trading_style_guidance: {get_trading_style_guidance(normalized_trading_style)}\n"
             f"- market_context_guidance: {get_market_context_guidance(normalized_market_context)}\n"
-            f"- backpack_execution_guidance: {get_backpack_execution_guidance(normalized_backpack_execution)}\n"
-            f"- drift_execution_guidance: {get_drift_execution_guidance(normalized_drift_execution)}\n"
+            f"- execution_gate_guidance: {get_execution_gate_guidance(normalized_execution_gate)}\n"
+            f"- tool_preferences_guidance: {get_tool_preferences_guidance(normalized_tool_preferences)}\n"
             f"- clarification_guidance: {intent_context.clarification_guidance}"
         )
 

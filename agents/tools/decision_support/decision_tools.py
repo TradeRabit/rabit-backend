@@ -304,7 +304,7 @@ def register_decision_support_tools() -> None:
             ),
             parameters=[
                 ToolParameter(name="summary", type="string", description="Short trade recap or debrief summary", required=True),
-                ToolParameter(name="exchange", type="string", description="Optional exchange such as drift or backpack", required=False),
+                ToolParameter(name="exchange", type="string", description="Optional market venue such as phantom, spot, or futures", required=False),
                 ToolParameter(name="symbol", type="string", description="Optional asset or market symbol", required=False),
                 ToolParameter(name="side", type="string", description="Optional side such as long or short", required=False),
                 ToolParameter(name="entry_price", type="number", description="Optional entry price", required=False),

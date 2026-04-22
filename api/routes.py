@@ -8,9 +8,21 @@ from typing import Optional, List
 import logging
 import asyncio
 import json
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 
 from agents.core import TradingAgent
+from agents.ai_usage_settlement import build_onchain_ai_usage_preview
+from agents.contract_execution import (
+    AiUsageAlreadySettledError,
+    ContractExecutionError,
+    build_unsigned_instruction_payload,
+    ensure_backend_matches_contract_authority,
+    get_ai_usage_settlement_database,
+    get_contract_readiness,
+    submit_backend_signed_instruction,
+    submit_signed_transaction,
+)
 from agents.auth import (
     JWTAuthError,
     WalletAuthError,
@@ -18,38 +30,25 @@ from agents.auth import (
     verify_access_token,
     verify_wallet_auth,
 )
-from agents.backpack_execution import normalize_backpack_execution
 from agents.pipeline.conversation_style import normalize_conversation_style
-from agents.drift_execution import (
-    DriftExecutionRequestNotFoundError,
-    DriftExecutionRequestOwnershipError,
-    DriftTxBuilderValidationError,
-    DriftTxBuilderWalletError,
-    build_drift_execution_wallet_status,
-    get_drift_execution_request_service,
-    get_drift_execution_tx_builder,
-    normalize_drift_execution,
-)
 from agents.auth.base58 import b58decode
-from agents.exchange_connections import (
-    ExchangeConnectionNotFoundError,
-    ExchangeConnectionOwnershipError,
-    ExchangeCredentialCryptoError,
-    get_exchange_connection_service,
-)
+from agents.pipeline.execution_gate import merge_legacy_execution_gates, normalize_execution_gate
 from agents.pipeline.market_context import normalize_market_context
-from agents.memory import Mem0DisabledError, Mem0RequestError, get_mem0_client
+from agents.pipeline.tool_preferences import normalize_tool_preferences
+from agents.memory import Mem0DisabledError, Mem0RequestError, get_conversation_database, get_mem0_client
 from agents.openrouter import get_openrouter_session_cost_service
 from agents.pipeline.artifacts import get_pipeline_artifact_service
 from agents.service_costs import get_monitoring_cost_service
+from agents.user_profiles import UsernameValidationError, get_user_profile_service
 from agents.pipeline.trading_style import normalize_trading_style
 from agents.tools_registry import register_trading_tools
 from agents.uploads import UploadValidationError, get_upload_manager
+from contract import derive_ai_usage_pda, derive_model_registry_pda, get_rabit_contract_sdk, load_deployment
 from config.settings import settings
 from ws.services import get_market_service
 from ws.handlers import MarketDataHandler
 from ws.news import get_news_monitor
-from ws.binance import BinanceHistoryDownloader
+from ws.phantom import HyperliquidHistoryDownloader
 from ws.utils.categories import get_category_stats, get_primary_category, normalize_category
 from api.models import (
     AssetCategoryAssetsResponse,
@@ -72,21 +71,38 @@ from api.models import (
     AgentUploadDeleteResponse,
     AgentChatRequest,
     AgentChatResponse,
+    AgentSessionDetailResponse,
+    AgentSessionDeleteResponse,
+    AgentSessionListResponse,
+    AgentSessionMessageResponse,
+    AgentSessionSummaryResponse,
+    AgentSessionUpdateRequest,
     AgentPipelineArtifactListResponse,
     AgentPipelineArtifactResponse,
     AuthMeResponse,
-    DriftExecutionPrepareRequest,
-    DriftExecutionRecordResponse,
-    DriftExecutionSubmitRequest,
-    DriftExecutionSubmitResponse,
-    DriftExecutionWalletResponse,
-    ExecutionAccessExchangeStatus,
-    ExecutionAccessResponse,
-    ExchangeConnectionCreateRequest,
-    ExchangeConnectionDeleteResponse,
-    ExchangeConnectionListResponse,
-    ExchangeConnectionResponse,
-    ExchangeConnectionUpdateRequest,
+    ContractAccountResponse,
+    ContractAdminUpdateAuthorityRequest,
+    ContractAdminUpdateBackendAuthorityRequest,
+    ContractAdminUpdateDefaultMarkupRequest,
+    ContractAdminUpdatePlatformFeeRequest,
+    ContractAiUsageSettleRequest,
+    ContractAiUsageSettlementResponse,
+    ContractAiUsageRecordListResponse,
+    ContractAiUsageRecordResponse,
+    ContractBackendInstructionResponse,
+    ContractClaimFeesRequest,
+    ContractDirectAiUsagePrepareRequest,
+    ContractModelDeactivateRequest,
+    ContractModelRegisterRequest,
+    ContractModelRegistryListResponse,
+    ContractModelUpdateRequest,
+    ContractReadinessResponse,
+    ContractSetupTransactionResponse,
+    ContractSignedTransactionSubmitRequest,
+    ContractSettlementListResponse,
+    ContractSettlementRecordResponse,
+    ContractTransactionSubmitResponse,
+    UsernameUpdateRequest,
     MemoryCreateRequest,
     MemoryCreateResponse,
     MemoryDeleteResponse,
@@ -165,14 +181,10 @@ def _raise_mem0_http_error(exc: Exception) -> None:
     raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-def _raise_exchange_connection_http_error(exc: Exception) -> None:
-    """Translate exchange connection service errors into HTTP responses."""
-    if isinstance(exc, ExchangeCredentialCryptoError):
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    if isinstance(exc, ExchangeConnectionNotFoundError):
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if isinstance(exc, ExchangeConnectionOwnershipError):
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+def _raise_user_profile_http_error(exc: Exception) -> None:
+    """Translate user profile errors into HTTP responses."""
+    if isinstance(exc, UsernameValidationError):
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if isinstance(exc, ValueError):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -271,14 +283,33 @@ def _serialize_market_context(context: Optional[dict]) -> dict:
     return normalize_market_context(context)
 
 
-def _serialize_backpack_execution(config: Optional[dict]) -> dict:
-    """Normalize Backpack execution values before returning them to clients."""
-    return normalize_backpack_execution(config)
+def _serialize_execution_gate(config: Optional[dict]) -> dict:
+    """Normalize generic execution-gate values before returning them to clients."""
+    return normalize_execution_gate(config)
 
 
-def _serialize_drift_execution(config: Optional[dict]) -> dict:
-    """Normalize Drift execution values before returning them to clients."""
-    return normalize_drift_execution(config)
+def _serialize_tool_preferences(config: Optional[dict]) -> dict:
+    """Normalize tool-preference values before returning them to clients."""
+    return normalize_tool_preferences(config)
+
+
+async def _get_onchain_model_registry_snapshot(*, force_refresh: bool = False):
+    """Load one cached on-chain model registry snapshot for model API enrichment."""
+    from agents.openrouter import get_contract_model_registry_service
+
+    service = get_contract_model_registry_service()
+    return await service.get_snapshot(force_refresh=force_refresh)
+
+
+def _serialize_model_info_response(model, onchain_snapshot) -> ModelInfoResponse:
+    """Serialize one backend model with on-chain registry enrichment."""
+    from agents.openrouter import get_contract_model_registry_service
+
+    payload = model.model_dump()
+    payload.update(
+        get_contract_model_registry_service().enrich_model(model.id, onchain_snapshot)
+    )
+    return ModelInfoResponse(**payload)
 
 
 def _serialize_session_cost(summary: Optional[dict]) -> Optional[dict]:
@@ -289,6 +320,83 @@ def _serialize_session_cost(summary: Optional[dict]) -> Optional[dict]:
 def _serialize_monitoring_cost(summary: Optional[dict]) -> Optional[dict]:
     """Return monitoring-cost payloads unchanged when present."""
     return summary or None
+
+
+def _build_agent_session_metadata(
+    *,
+    request: AgentChatRequest,
+    user_id: Optional[str],
+) -> dict:
+    """Build metadata for one persisted assist session."""
+    market_context = normalize_market_context(
+        request.market_context.model_dump() if request.market_context else None
+    )
+    symbol = market_context.get("symbol")
+    source_screen = market_context.get("source_screen")
+    scope_mode = market_context.get("scope_mode")
+    exchange = market_context.get("exchange")
+    asset_name = market_context.get("asset_name")
+    tool_preferences = normalize_tool_preferences(
+        request.tool_preferences.model_dump() if request.tool_preferences else None
+    )
+
+    title = None
+    message_text = str(request.message or "").strip()
+    if message_text:
+        title = message_text[:50] + ("..." if len(message_text) > 50 else "")
+    elif symbol:
+        title = f"{symbol} Assist"
+    elif asset_name:
+        title = f"{asset_name} Assist"
+
+    metadata = {
+        "user_id": user_id,
+        "title": title,
+        "scope_mode": scope_mode,
+        "symbol": symbol,
+        "exchange": exchange,
+        "asset_name": asset_name,
+        "source_screen": source_screen,
+        "tool_preferences": tool_preferences,
+        "conversation_style": normalize_conversation_style(request.conversation_style),
+        "trading_style": normalize_trading_style(request.trading_style),
+    }
+    return {key: value for key, value in metadata.items() if value not in (None, "")}
+
+
+def _persist_agent_session_metadata(
+    *,
+    scope_id: Optional[str],
+    request: AgentChatRequest,
+    user_id: Optional[str],
+) -> None:
+    """Persist frontend session metadata after one agent turn completes."""
+    normalized_scope_id = str(scope_id or "").strip()
+    if not normalized_scope_id:
+        return
+
+    metadata = _build_agent_session_metadata(request=request, user_id=user_id)
+    if not metadata:
+        return
+
+    get_conversation_database().update_session_metadata(normalized_scope_id, metadata)
+
+
+def _serialize_agent_session_summary(raw: dict) -> AgentSessionSummaryResponse:
+    """Convert raw conversation-db session summaries into API responses."""
+    return AgentSessionSummaryResponse(
+        scope_id=raw.get("scope_id", ""),
+        title=raw.get("title") or "Untitled",
+        message_count=raw.get("message_count", 0),
+        created_at=raw.get("created_at"),
+        updated_at=raw.get("updated_at"),
+        last_message=raw.get("last_message"),
+        user_id=raw.get("user_id"),
+        scope_mode=raw.get("scope_mode"),
+        symbol=raw.get("symbol"),
+        exchange=raw.get("exchange"),
+        source_screen=raw.get("source_screen"),
+    )
 
 
 def _build_service_cost_summary(
@@ -331,6 +439,13 @@ def _build_service_cost_summary(
         if value
     ]
 
+    onchain_ai_usage = build_onchain_ai_usage_preview(
+        scope_id=normalized_scope_id,
+        user_id=(model_summary or {}).get("user_id") or (monitor_summary or {}).get("user_id") or user_id,
+        session_cost=model_summary,
+        monitoring_cost=monitor_summary,
+    )
+
     return {
         "scope_id": normalized_scope_id,
         "user_id": (model_summary or {}).get("user_id") or (monitor_summary or {}).get("user_id") or user_id,
@@ -344,22 +459,10 @@ def _build_service_cost_summary(
         ),
         "session_cost": model_summary,
         "monitoring_cost": monitor_summary,
+        "onchain_ai_usage": onchain_ai_usage,
         "created_at": min(created_at_candidates) if created_at_candidates else None,
         "updated_at": max(updated_at_candidates) if updated_at_candidates else None,
     }
-
-
-def _raise_drift_execution_http_error(exc: Exception) -> None:
-    """Translate Drift execution request ownership/storage errors into HTTP responses."""
-    if isinstance(exc, DriftExecutionRequestNotFoundError):
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if isinstance(exc, DriftExecutionRequestOwnershipError):
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    if isinstance(exc, (DriftTxBuilderValidationError, DriftTxBuilderWalletError)):
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if isinstance(exc, ValueError):
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _require_wallet_authenticated_user(auth_user: Optional[dict]) -> tuple[str, str]:
@@ -371,34 +474,68 @@ def _require_wallet_authenticated_user(auth_user: Optional[dict]) -> tuple[str, 
     if not user_id or not wallet_address:
         raise HTTPException(
             status_code=401,
-            detail="Wallet-authenticated user is required for Drift execution endpoints.",
+            detail="Wallet-authenticated user is required for contract-protected endpoints.",
         )
     return user_id, wallet_address
 
 
-def _require_drift_execution_api_enabled() -> None:
-    """Require backend Drift execution API gate."""
-    if not settings.DRIFT_EXECUTION_ENABLED:
-        raise HTTPException(
-            status_code=403,
-            detail="Drift live execution is globally disabled by backend configuration.",
-        )
+def _raise_contract_execution_http_error(exc: Exception) -> None:
+    """Translate contract execution/setup errors into HTTP responses."""
+    if isinstance(exc, AiUsageAlreadySettledError):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, ContractExecutionError):
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if isinstance(exc, ValueError):
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-def _require_same_wallet_execution_status(user_id: str) -> dict:
-    """Require the current user to resolve to same-wallet Drift execution mode."""
-    status = build_drift_execution_wallet_status(user_id)
-    if not status.get("verified"):
+async def _require_contract_chat_ready(auth_user: Optional[dict]) -> Optional[dict]:
+    """Enforce on-chain payment readiness before allowing paid assist messages."""
+    if not settings.RABIT_AI_USAGE_ENFORCE_CHAT_BALANCE:
+        return None
+    if auth_user is None:
+        return None
+
+    user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    readiness = await get_contract_readiness(wallet_address=wallet_address, user_id=user_id)
+    if not readiness.get("setup_complete"):
         raise HTTPException(
             status_code=403,
-            detail="Drift execution wallet is not verified for this user.",
+            detail={
+                "message": "On-chain AI usage setup is incomplete.",
+                "readiness": readiness,
+            },
         )
-    if status.get("mode") != "same_wallet":
+    if not readiness.get("balance_ok"):
         raise HTTPException(
-            status_code=403,
-            detail="Only same-wallet Drift execution is supported in v1.",
+            status_code=402,
+            detail={
+                "message": f"Insufficient payment balance. Minimum required is ${settings.RABIT_AI_USAGE_CHAT_MIN_BALANCE_USD:.2f}.",
+                "readiness": readiness,
+            },
         )
-    return status
+    return readiness
+
+
+def _normalize_exchange_filter(exchange: Optional[str]) -> Optional[str]:
+    """Normalize frontend market source filters into Phantom spot/futures channels."""
+    if exchange is None:
+        return None
+
+    normalized_exchange = str(exchange).strip().lower()
+    if not normalized_exchange:
+        return None
+
+    if normalized_exchange not in {"phantom", "spot", "futures"}:
+        raise HTTPException(
+            status_code=400,
+            detail="exchange must be one of 'phantom', 'spot', or 'futures'.",
+        )
+
+    if normalized_exchange == "spot":
+        return "phantom_spot"
+    return "phantom_futures"
 
 
 def _decode_signed_transaction(payload: str, encoding: str) -> bytes:
@@ -417,6 +554,97 @@ def _decode_signed_transaction(payload: str, encoding: str) -> bytes:
         except Exception as exc:
             raise ValueError("Invalid base58 signed_transaction payload.") from exc
     raise ValueError("transaction_encoding must be 'base64' or 'base58'.")
+
+
+def _serialize_contract_value(value):
+    """Normalize dataclass-backed contract SDK values into JSON-safe dicts."""
+    if value is None:
+        return None
+    if is_dataclass(value):
+        return asdict(value)
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if isinstance(value, dict):
+        return dict(value)
+    if hasattr(value, "__dict__"):
+        return {
+            key: serialized
+            for key, serialized in vars(value).items()
+            if not key.startswith("_")
+        }
+    return value
+
+
+async def _build_unsigned_contract_action_payload(
+    *,
+    payer: str,
+    instruction,
+    action: str,
+    rpc_url: str,
+) -> ContractSetupTransactionResponse:
+    payload = await build_unsigned_instruction_payload(
+        payer=payer,
+        instruction=instruction,
+        classification="contract_setup_mobile_signing_payload",
+        action=action,
+        rpc_url=rpc_url,
+    )
+    return ContractSetupTransactionResponse(**payload)
+
+
+def _build_backend_contract_response(
+    *,
+    action: str,
+    instruction_name: str,
+    submitted: dict,
+    metadata: Optional[dict] = None,
+    detail: Optional[str] = None,
+) -> ContractBackendInstructionResponse:
+    deployment = load_deployment(settings.RABIT_CONTRACT_CLUSTER)
+    return ContractBackendInstructionResponse(
+        success=True,
+        action=action,
+        cluster=deployment.cluster,
+        program_id=deployment.program_id,
+        instruction_name=instruction_name,
+        signer=str(submitted.get("signer") or ""),
+        transaction_signature=str(submitted["transaction_signature"]),
+        rpc_url=str(submitted["rpc_url"]),
+        metadata=metadata or {},
+        detail=detail,
+    )
+
+
+def _require_contract_authority_signer() -> str:
+    """Ensure the configured backend signer matches the deployed contract authority."""
+    try:
+        return ensure_backend_matches_contract_authority()
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+        raise
+
+
+def _build_scope_onchain_preview(*, scope_id: str, user_id: str) -> dict:
+    """Load one service-cost summary and require a buildable on-chain AI usage preview."""
+    summary = _build_service_cost_summary(scope_id=scope_id, user_id=user_id)
+    if not summary:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No service cost summary found for scope_id '{scope_id}'.",
+        )
+    owner_user_id = summary.get("user_id")
+    if owner_user_id and owner_user_id != user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Requested scope_id does not belong to the authenticated user.",
+        )
+    preview = summary.get("onchain_ai_usage")
+    if not preview or not preview.get("instruction_buildable"):
+        raise HTTPException(
+            status_code=409,
+            detail="This scope is not ready for on-chain settlement yet. Ensure it resolves to one model and payment mint configuration is complete.",
+        )
+    return preview
 
 
 # ============================================================================
@@ -475,112 +703,46 @@ async def get_authenticated_me(authorization: Optional[str] = Header(default=Non
     auth_user = _get_authenticated_user(authorization)
     if auth_user is None:
         raise HTTPException(status_code=401, detail="Missing bearer token.")
-    return AuthMeResponse(
+    profile = get_user_profile_service().get_profile(
         user_id=auth_user["user_id"],
         wallet_address=auth_user["wallet_address"],
     )
+    return AuthMeResponse(
+        user_id=auth_user["user_id"],
+        wallet_address=auth_user["wallet_address"],
+        username=profile.get("username"),
+    )
 
 
-@router.get(
-    "/drift/execution-wallet",
-    response_model=DriftExecutionWalletResponse,
-    tags=["Drift"],
-    summary="Return resolved Drift execution wallet status",
+@router.patch(
+    "/auth/me/username",
+    response_model=AuthMeResponse,
+    tags=["Auth"],
+    summary="Update authenticated username",
 )
-async def get_drift_execution_wallet(authorization: Optional[str] = Header(default=None)):
-    """Return the current Drift auth-wallet/execution-wallet status."""
+async def update_authenticated_username(
+    request: UsernameUpdateRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Create or update the authenticated user's username."""
     auth_user = _get_authenticated_user(authorization)
     if auth_user is None:
         raise HTTPException(status_code=401, detail="Missing bearer token.")
-    return DriftExecutionWalletResponse(
-        **build_drift_execution_wallet_status(auth_user.get("user_id"))
-    )
 
-
-@router.get(
-    "/execution-access",
-    response_model=ExecutionAccessResponse,
-    tags=["Exchange Connections"],
-    summary="Return unified execution access status",
-)
-async def get_execution_access_status(
-    user_id: Optional[str] = Query(None, description="Optional explicit user ID when no bearer token is available"),
-    authorization: Optional[str] = Header(default=None),
-):
-    """Return a unified frontend-friendly execution access status for Backpack and Drift."""
-    auth_user = _get_authenticated_user(authorization)
-    resolved_user_id = _resolve_request_user_id(
-        provided_user_id=user_id,
-        auth_user=auth_user,
-    )
-    if not resolved_user_id:
-        raise HTTPException(
-            status_code=401,
-            detail="Authenticated user or explicit user_id is required for execution access status.",
+    try:
+        profile = get_user_profile_service().set_username(
+            user_id=auth_user["user_id"],
+            wallet_address=auth_user["wallet_address"],
+            username=request.username,
         )
-
-    service = get_exchange_connection_service()
-    backpack_connections = service.list_connections(user_id=resolved_user_id, exchange="backpack")
-    active_backpack = next(
-        (item for item in backpack_connections if item.get("is_active")),
-        None,
-    )
-
-    backpack_status = ExecutionAccessExchangeStatus(
-        exchange="backpack",
-        authority_type="api_credential",
-        connected=active_backpack is not None,
-        execution_ready=bool(
-            settings.BACKPACK_EXECUTION_ENABLED
-            and active_backpack
-            and active_backpack.get("trading_enabled")
-            and not active_backpack.get("read_only", True)
-        ),
-        backend_enabled=settings.BACKPACK_EXECUTION_ENABLED,
-        active_connection_id=active_backpack.get("id") if active_backpack else None,
-        label=active_backpack.get("label") if active_backpack else None,
-        trading_enabled=bool(active_backpack.get("trading_enabled")) if active_backpack else None,
-        read_only=bool(active_backpack.get("read_only")) if active_backpack else None,
-        notes=(
-            [
-                "Backpack execution uses encrypted exchange API credentials.",
-                "Execution is ready only when an active connection exists, trading is enabled, the connection is not read-only, and backend execution is enabled.",
-            ]
-            if active_backpack
-            else [
-                "No active Backpack connection is configured for this user.",
-            ]
-        ),
-    )
-
-    drift_wallet_status = build_drift_execution_wallet_status(
-        auth_user.get("user_id") if auth_user else None
-    )
-    drift_status = ExecutionAccessExchangeStatus(
-        exchange="drift",
-        authority_type="wallet_session",
-        connected=bool(drift_wallet_status.get("verified")),
-        execution_ready=bool(
-            settings.DRIFT_EXECUTION_ENABLED
-            and drift_wallet_status.get("verified")
-            and drift_wallet_status.get("mode") == "same_wallet"
-        ),
-        backend_enabled=settings.DRIFT_EXECUTION_ENABLED,
-        mode=drift_wallet_status.get("mode"),
-        auth_wallet_address=drift_wallet_status.get("auth_wallet_address"),
-        execution_wallet_address=drift_wallet_status.get("execution_wallet_address"),
-        same_wallet_required=drift_wallet_status.get("same_wallet_required"),
-        linked_wallet_supported=drift_wallet_status.get("linked_wallet_supported"),
-        backend_held_signer_enabled=drift_wallet_status.get("backend_held_signer_enabled"),
-        notes=list(drift_wallet_status.get("notes", [])),
-    )
-
-    return ExecutionAccessResponse(
-        user_id=resolved_user_id,
-        authenticated=auth_user is not None,
-        backpack=backpack_status,
-        drift=drift_status,
-    )
+        return AuthMeResponse(
+            user_id=auth_user["user_id"],
+            wallet_address=auth_user["wallet_address"],
+            username=profile.get("username"),
+        )
+    except Exception as exc:
+        logger.error(f"Error updating authenticated username: {exc}")
+        _raise_user_profile_http_error(exc)
 
 
 @router.get(
@@ -670,6 +832,981 @@ async def get_service_cost(
 
 
 @router.get(
+    "/contract/readiness",
+    response_model=ContractReadinessResponse,
+    tags=["Contract"],
+    summary="Return on-chain setup and balance readiness for the authenticated wallet",
+)
+async def get_contract_setup_readiness(authorization: Optional[str] = Header(default=None)):
+    """Return current Rabit contract onboarding and balance readiness."""
+    auth_user = _get_authenticated_user(authorization)
+    user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        readiness = await get_contract_readiness(wallet_address=wallet_address, user_id=user_id)
+        return ContractReadinessResponse(**readiness)
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.get(
+    "/contract/config",
+    response_model=ContractAccountResponse,
+    tags=["Contract"],
+    summary="Return the decoded Rabit platform config account",
+)
+async def get_contract_config_account():
+    """Return decoded PlatformConfig state from the deployed Rabit contract."""
+    try:
+        sdk = get_rabit_contract_sdk()
+        deployment = load_deployment(settings.RABIT_CONTRACT_CLUSTER)
+        account = await sdk.get_config()
+        return ContractAccountResponse(
+            cluster=deployment.cluster,
+            program_id=deployment.program_id,
+            account_type="platform_config",
+            pda=deployment.config_pda,
+            exists=account is not None,
+            data=_serialize_contract_value(account),
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.get(
+    "/contract/spending-profile",
+    response_model=ContractAccountResponse,
+    tags=["Contract"],
+    summary="Return the authenticated wallet's decoded spending profile",
+)
+async def get_contract_spending_profile(authorization: Optional[str] = Header(default=None)):
+    """Return decoded SpendingProfile for the authenticated wallet."""
+    auth_user = _get_authenticated_user(authorization)
+    _user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        sdk = get_rabit_contract_sdk()
+        deployment = load_deployment(settings.RABIT_CONTRACT_CLUSTER)
+        readiness = await get_contract_readiness(wallet_address=wallet_address)
+        account = await sdk.get_spending_profile(wallet_address)
+        return ContractAccountResponse(
+            cluster=deployment.cluster,
+            program_id=deployment.program_id,
+            account_type="spending_profile",
+            pda=str(readiness.get("spending_profile_pda") or ""),
+            exists=account is not None,
+            data=_serialize_contract_value(account),
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.get(
+    "/contract/delegated-signer",
+    response_model=ContractAccountResponse,
+    tags=["Contract"],
+    summary="Return the authenticated wallet's backend delegated signer account",
+)
+async def get_contract_delegated_signer_account(authorization: Optional[str] = Header(default=None)):
+    """Return decoded DelegatedSigner account for the authenticated wallet and backend authority."""
+    auth_user = _get_authenticated_user(authorization)
+    _user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        deployment = load_deployment(settings.RABIT_CONTRACT_CLUSTER)
+        if not deployment.backend_authority_wallet:
+            raise ContractExecutionError("Contract deployment metadata has no backend authority wallet.")
+        sdk = get_rabit_contract_sdk()
+        readiness = await get_contract_readiness(wallet_address=wallet_address)
+        account = await sdk.get_delegated_signer(wallet_address, deployment.backend_authority_wallet)
+        return ContractAccountResponse(
+            cluster=deployment.cluster,
+            program_id=deployment.program_id,
+            account_type="delegated_signer",
+            pda=str(readiness.get("delegated_signer_pda") or ""),
+            exists=account is not None,
+            data=_serialize_contract_value(account),
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.get(
+    "/contract/model-registry",
+    response_model=ContractModelRegistryListResponse,
+    tags=["Contract"],
+    summary="Return decoded on-chain model registry entries",
+)
+async def list_contract_model_registry_accounts():
+    """Return every decodable on-chain ModelRegistry account."""
+    try:
+        sdk = get_rabit_contract_sdk()
+        deployment = load_deployment(settings.RABIT_CONTRACT_CLUSTER)
+        accounts = await sdk.list_model_registry_accounts()
+        models = [
+            {
+                "pda": pda,
+                **(_serialize_contract_value(account) or {}),
+            }
+            for pda, account in accounts
+        ]
+        return ContractModelRegistryListResponse(
+            cluster=deployment.cluster,
+            program_id=deployment.program_id,
+            models=models,
+            total=len(models),
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.get(
+    "/contract/model-registry/{model_id:path}",
+    response_model=ContractAccountResponse,
+    tags=["Contract"],
+    summary="Return one decoded on-chain model registry entry",
+)
+async def get_contract_model_registry_account(model_id: str):
+    """Return decoded ModelRegistry entry for one model ID."""
+    try:
+        sdk = get_rabit_contract_sdk()
+        deployment = load_deployment(settings.RABIT_CONTRACT_CLUSTER)
+        account = await sdk.get_model_registry(model_id)
+        model_registry_pda = derive_model_registry_pda(
+            model_id,
+            cluster=deployment.cluster,
+            program_id=deployment.program_id,
+        )[0]
+        return ContractAccountResponse(
+            cluster=deployment.cluster,
+            program_id=deployment.program_id,
+            account_type="model_registry",
+            pda=model_registry_pda,
+            exists=account is not None,
+            data=_serialize_contract_value(account),
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.get(
+    "/contract/ai-usage",
+    response_model=ContractAiUsageRecordListResponse,
+    tags=["Contract"],
+    summary="Return decoded on-chain AI usage records for the authenticated wallet",
+)
+async def list_contract_ai_usage_records(authorization: Optional[str] = Header(default=None)):
+    """Return every decodable AiUsageRecord for the authenticated wallet's spending profile."""
+    auth_user = _get_authenticated_user(authorization)
+    _user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        sdk = get_rabit_contract_sdk()
+        deployment = load_deployment(settings.RABIT_CONTRACT_CLUSTER)
+        readiness = await get_contract_readiness(wallet_address=wallet_address)
+        spending_profile_pda = readiness.get("spending_profile_pda")
+        if not spending_profile_pda:
+            raise HTTPException(status_code=404, detail="Spending profile was not found on-chain.")
+        records = await sdk.list_ai_usage_records(spending_profile=spending_profile_pda)
+        payload = [
+            ContractAiUsageRecordResponse(
+                cluster=deployment.cluster,
+                program_id=deployment.program_id,
+                wallet_address=wallet_address,
+                spending_profile_pda=spending_profile_pda,
+                usage_record_pda=pda,
+                usage_sequence=None,
+                data=_serialize_contract_value(record) or {},
+            )
+            for pda, record in records
+        ]
+        return ContractAiUsageRecordListResponse(
+            cluster=deployment.cluster,
+            program_id=deployment.program_id,
+            wallet_address=wallet_address,
+            spending_profile_pda=spending_profile_pda,
+            records=payload,
+            total=len(payload),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.get(
+    "/contract/ai-usage/{usage_sequence}",
+    response_model=ContractAiUsageRecordResponse,
+    tags=["Contract"],
+    summary="Return one decoded on-chain AI usage record for the authenticated wallet",
+)
+async def get_contract_ai_usage_record(usage_sequence: int, authorization: Optional[str] = Header(default=None)):
+    """Return one AiUsageRecord by usage sequence for the authenticated wallet."""
+    auth_user = _get_authenticated_user(authorization)
+    _user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        sdk = get_rabit_contract_sdk()
+        deployment = load_deployment(settings.RABIT_CONTRACT_CLUSTER)
+        readiness = await get_contract_readiness(wallet_address=wallet_address)
+        spending_profile_pda = readiness.get("spending_profile_pda")
+        if not spending_profile_pda:
+            raise HTTPException(status_code=404, detail="Spending profile was not found on-chain.")
+        record = await sdk.get_ai_usage_record(spending_profile_pda, usage_sequence)
+        if record is None:
+            raise HTTPException(status_code=404, detail="AI usage record was not found on-chain.")
+        usage_record_pda = derive_ai_usage_pda(
+            spending_profile_pda,
+            usage_sequence,
+            cluster=deployment.cluster,
+            program_id=deployment.program_id,
+        )[0]
+        return ContractAiUsageRecordResponse(
+            cluster=deployment.cluster,
+            program_id=deployment.program_id,
+            wallet_address=wallet_address,
+            spending_profile_pda=spending_profile_pda,
+            usage_record_pda=usage_record_pda,
+            usage_sequence=usage_sequence,
+            data=_serialize_contract_value(record) or {},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/setup/spending-profile/prepare",
+    response_model=ContractSetupTransactionResponse,
+    tags=["Contract"],
+    summary="Prepare unsigned transaction to initialize a spending profile",
+)
+async def prepare_contract_spending_profile(authorization: Optional[str] = Header(default=None)):
+    """Build an unsigned initialize_spending_profile transaction for the authenticated wallet."""
+    auth_user = _get_authenticated_user(authorization)
+    _user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        readiness = await get_contract_readiness(wallet_address=wallet_address)
+        if readiness.get("spending_profile_exists"):
+            raise HTTPException(status_code=409, detail="Spending profile is already initialized.")
+
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_initialize_spending_profile_instruction(
+            owner=wallet_address,
+            payment_mint=settings.RABIT_AI_USAGE_PAYMENT_MINT,
+        )
+        return await _build_unsigned_contract_action_payload(
+            payer=wallet_address,
+            instruction=instruction,
+            action="initialize_spending_profile",
+            rpc_url=sdk.rpc_url,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/setup/delegated-signer/prepare",
+    response_model=ContractSetupTransactionResponse,
+    tags=["Contract"],
+    summary="Prepare unsigned transaction to create the backend delegated signer",
+)
+async def prepare_contract_delegated_signer(authorization: Optional[str] = Header(default=None)):
+    """Build an unsigned create_delegated_signer transaction for the authenticated wallet."""
+    auth_user = _get_authenticated_user(authorization)
+    _user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        readiness = await get_contract_readiness(wallet_address=wallet_address)
+        if readiness.get("delegated_signer_exists"):
+            raise HTTPException(status_code=409, detail="Delegated signer is already initialized.")
+        if not readiness.get("backend_authority_wallet"):
+            raise ContractExecutionError("Contract deployment metadata has no backend authority wallet.")
+
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_create_delegated_signer_instruction(
+            owner=wallet_address,
+            delegate=readiness["backend_authority_wallet"],
+            expiry_duration=settings.RABIT_AI_USAGE_DELEGATION_EXPIRY_SECONDS,
+            spending_limit=settings.RABIT_AI_USAGE_DELEGATION_SPENDING_LIMIT_UNITS,
+        )
+        return await _build_unsigned_contract_action_payload(
+            payer=wallet_address,
+            instruction=instruction,
+            action="create_delegated_signer",
+            rpc_url=sdk.rpc_url,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/setup/approve-delegate/prepare",
+    response_model=ContractSetupTransactionResponse,
+    tags=["Contract"],
+    summary="Prepare unsigned transaction to approve the backend delegated signer on the payment token account",
+)
+async def prepare_contract_approve_delegate(authorization: Optional[str] = Header(default=None)):
+    """Build an unsigned approve_spending_delegate transaction for the authenticated wallet."""
+    auth_user = _get_authenticated_user(authorization)
+    _user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        readiness = await get_contract_readiness(wallet_address=wallet_address)
+        if not readiness.get("spending_profile_exists"):
+            raise HTTPException(status_code=409, detail="Spending profile must be initialized before delegate approval.")
+        if not readiness.get("delegated_signer_exists"):
+            raise HTTPException(status_code=409, detail="Delegated signer must be created before delegate approval.")
+        if not readiness.get("user_token_account_exists"):
+            raise HTTPException(status_code=409, detail="User payment token account does not exist yet.")
+
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_approve_spending_delegate_instruction(
+            owner=wallet_address,
+            delegate=readiness["backend_authority_wallet"],
+            user_token_account=readiness["user_token_account"],
+        )
+        return await _build_unsigned_contract_action_payload(
+            payer=wallet_address,
+            instruction=instruction,
+            action="approve_spending_delegate",
+            rpc_url=sdk.rpc_url,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/setup/revoke-delegate/prepare",
+    response_model=ContractSetupTransactionResponse,
+    tags=["Contract"],
+    summary="Prepare unsigned transaction to revoke the payment-token delegate",
+)
+async def prepare_contract_revoke_delegate(authorization: Optional[str] = Header(default=None)):
+    """Build an unsigned revoke_spending_delegate transaction for the authenticated wallet."""
+    auth_user = _get_authenticated_user(authorization)
+    _user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        readiness = await get_contract_readiness(wallet_address=wallet_address)
+        if not readiness.get("spending_profile_exists"):
+            raise HTTPException(status_code=409, detail="Spending profile is not initialized.")
+        if not readiness.get("user_token_account_exists"):
+            raise HTTPException(status_code=409, detail="User payment token account does not exist yet.")
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_revoke_spending_delegate_instruction(
+            owner=wallet_address,
+            user_token_account=readiness["user_token_account"],
+        )
+        return await _build_unsigned_contract_action_payload(
+            payer=wallet_address,
+            instruction=instruction,
+            action="revoke_spending_delegate",
+            rpc_url=sdk.rpc_url,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/setup/close-spending-profile/prepare",
+    response_model=ContractSetupTransactionResponse,
+    tags=["Contract"],
+    summary="Prepare unsigned transaction to close the spending profile",
+)
+async def prepare_contract_close_spending_profile(authorization: Optional[str] = Header(default=None)):
+    """Build an unsigned close_spending_profile transaction for the authenticated wallet."""
+    auth_user = _get_authenticated_user(authorization)
+    _user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        readiness = await get_contract_readiness(wallet_address=wallet_address)
+        if not readiness.get("spending_profile_exists"):
+            raise HTTPException(status_code=409, detail="Spending profile is not initialized.")
+        if not readiness.get("user_token_account_exists"):
+            raise HTTPException(status_code=409, detail="User payment token account does not exist yet.")
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_close_spending_profile_instruction(
+            owner=wallet_address,
+            user_token_account=readiness["user_token_account"],
+        )
+        return await _build_unsigned_contract_action_payload(
+            payer=wallet_address,
+            instruction=instruction,
+            action="close_spending_profile",
+            rpc_url=sdk.rpc_url,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/setup/revoke-delegated-signer/prepare",
+    response_model=ContractSetupTransactionResponse,
+    tags=["Contract"],
+    summary="Prepare unsigned transaction to revoke the backend delegated signer account",
+)
+async def prepare_contract_revoke_delegated_signer(authorization: Optional[str] = Header(default=None)):
+    """Build an unsigned revoke_delegated_signer transaction for the authenticated wallet."""
+    auth_user = _get_authenticated_user(authorization)
+    _user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        readiness = await get_contract_readiness(wallet_address=wallet_address)
+        if not readiness.get("delegated_signer_exists"):
+            raise HTTPException(status_code=409, detail="Delegated signer is not initialized.")
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_revoke_delegated_signer_instruction(
+            owner=wallet_address,
+            delegate=readiness["backend_authority_wallet"],
+        )
+        return await _build_unsigned_contract_action_payload(
+            payer=wallet_address,
+            instruction=instruction,
+            action="revoke_delegated_signer",
+            rpc_url=sdk.rpc_url,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/setup/close-delegated-signer/prepare",
+    response_model=ContractSetupTransactionResponse,
+    tags=["Contract"],
+    summary="Prepare unsigned transaction to close the backend delegated signer account",
+)
+async def prepare_contract_close_delegated_signer(authorization: Optional[str] = Header(default=None)):
+    """Build an unsigned close_delegated_signer transaction for the authenticated wallet."""
+    auth_user = _get_authenticated_user(authorization)
+    _user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        readiness = await get_contract_readiness(wallet_address=wallet_address)
+        if not readiness.get("delegated_signer_exists"):
+            raise HTTPException(status_code=409, detail="Delegated signer is not initialized.")
+        if readiness.get("delegated_signer_active"):
+            raise HTTPException(status_code=409, detail="Delegated signer must be revoked before it can be closed.")
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_close_delegated_signer_instruction(
+            owner=wallet_address,
+            delegate=readiness["backend_authority_wallet"],
+        )
+        return await _build_unsigned_contract_action_payload(
+            payer=wallet_address,
+            instruction=instruction,
+            action="close_delegated_signer",
+            rpc_url=sdk.rpc_url,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/setup/submit",
+    response_model=ContractTransactionSubmitResponse,
+    tags=["Contract"],
+    summary="Submit a signed Rabit contract setup transaction",
+)
+async def submit_contract_setup_transaction(
+    request: ContractSignedTransactionSubmitRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Submit a user-signed Rabit contract setup transaction to Solana RPC."""
+    auth_user = _get_authenticated_user(authorization)
+    _user_id, _wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        raw_tx = _decode_signed_transaction(request.signed_transaction, request.transaction_encoding)
+        tx_signature = await submit_signed_transaction(
+            signed_transaction=raw_tx,
+            rpc_url=get_rabit_contract_sdk().rpc_url,
+            skip_preflight=request.skip_preflight,
+            max_retries=request.max_retries,
+        )
+        return ContractTransactionSubmitResponse(
+            success=True,
+            action=request.action,
+            transaction_signature=tx_signature,
+            rpc_url=get_rabit_contract_sdk().rpc_url,
+            detail="Signed contract setup transaction submitted to Solana RPC.",
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/ai-usage/direct/prepare",
+    response_model=ContractSetupTransactionResponse,
+    tags=["Contract"],
+    summary="Prepare unsigned transaction to record one scope's AI usage directly from the user's token account",
+)
+async def prepare_contract_direct_ai_usage(
+    request: ContractDirectAiUsagePrepareRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Build an unsigned record_ai_usage transaction for one scope so the user can sign directly."""
+    auth_user = _get_authenticated_user(authorization)
+    user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        readiness = await get_contract_readiness(wallet_address=wallet_address, user_id=user_id)
+        if not readiness.get("spending_profile_exists"):
+            raise HTTPException(status_code=409, detail="Spending profile was not found on-chain.")
+        if not readiness.get("user_token_account_exists"):
+            raise HTTPException(status_code=409, detail="User payment token account does not exist yet.")
+        if not readiness.get("fee_recipient_token_account_exists"):
+            raise HTTPException(status_code=409, detail="Fee recipient token account does not exist yet.")
+
+        preview = _build_scope_onchain_preview(scope_id=request.scope_id, user_id=user_id)
+        sdk = get_rabit_contract_sdk()
+        spending_profile = await sdk.get_spending_profile(wallet_address)
+        if spending_profile is None:
+            raise HTTPException(status_code=409, detail="Spending profile was not found on-chain.")
+
+        instruction = sdk.build_record_ai_usage_instruction(
+            user=wallet_address,
+            owner=wallet_address,
+            user_token_account=readiness["user_token_account"],
+            fee_recipient_token_account=readiness["fee_recipient_token_account"],
+            payment_mint=settings.RABIT_AI_USAGE_PAYMENT_MINT,
+            model_id=preview["model_id"],
+            base_cost=int(preview["base_cost_units"]),
+            service_cost=int(preview["service_cost_units"]),
+            usage_type=preview["usage_type"],
+            tokens_used=int(preview["tokens_used"]),
+            usage_sequence=int(spending_profile.usage_sequence),
+            markup_bps=int(preview["markup_bps"]),
+        )
+        return await _build_unsigned_contract_action_payload(
+            payer=wallet_address,
+            instruction=instruction,
+            action="record_ai_usage",
+            rpc_url=sdk.rpc_url,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/ai-usage/settle",
+    response_model=ContractAiUsageSettlementResponse,
+    tags=["Contract"],
+    summary="Settle one scope's accumulated AI usage on-chain using the delegated backend signer",
+)
+async def settle_contract_ai_usage(
+    request: ContractAiUsageSettleRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """Submit a backend-signed record_ai_usage_with_delegation transaction for one scope."""
+    auth_user = _get_authenticated_user(authorization)
+    user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        readiness = await get_contract_readiness(wallet_address=wallet_address, user_id=user_id)
+        if not readiness.get("setup_complete"):
+            raise HTTPException(status_code=403, detail="Contract setup is incomplete for this wallet.")
+        if not readiness.get("backend_signer_ready"):
+            raise ContractExecutionError("Backend contract signer is not configured or could not be loaded.")
+        if not readiness.get("balance_ok"):
+            raise HTTPException(
+                status_code=402,
+                detail=f"Insufficient payment balance. Minimum required is ${settings.RABIT_AI_USAGE_CHAT_MIN_BALANCE_USD:.2f}.",
+            )
+
+        settlement_db = get_ai_usage_settlement_database()
+        existing = settlement_db.get(request.scope_id)
+        if existing and existing.get("transaction_signature"):
+            raise AiUsageAlreadySettledError(
+                f"Scope '{request.scope_id}' has already been settled on-chain."
+            )
+
+        preview = _build_scope_onchain_preview(scope_id=request.scope_id, user_id=user_id)
+
+        sdk = get_rabit_contract_sdk()
+        spending_profile = await sdk.get_spending_profile(wallet_address)
+        if spending_profile is None:
+            raise HTTPException(status_code=409, detail="Spending profile was not found on-chain.")
+
+        instruction = sdk.build_record_ai_usage_with_delegation_instruction(
+            owner=wallet_address,
+            delegate=readiness["backend_authority_wallet"],
+            user_token_account=readiness["user_token_account"],
+            fee_recipient_token_account=readiness["fee_recipient_token_account"],
+            payment_mint=settings.RABIT_AI_USAGE_PAYMENT_MINT,
+            model_id=preview["model_id"],
+            base_cost=int(preview["base_cost_units"]),
+            service_cost=int(preview["service_cost_units"]),
+            usage_type=preview["usage_type"],
+            tokens_used=int(preview["tokens_used"]),
+            usage_sequence=int(spending_profile.usage_sequence),
+            markup_bps=int(preview["markup_bps"]),
+        )
+        submitted = await submit_backend_signed_instruction(
+            instruction=instruction,
+            payer=readiness["backend_signer_pubkey"] or readiness["backend_authority_wallet"],
+            rpc_url=sdk.rpc_url,
+        )
+
+        settlement_record = {
+            "scope_id": request.scope_id,
+            "user_id": user_id,
+            "wallet_address": wallet_address,
+            "transaction_signature": submitted["transaction_signature"],
+            "rpc_url": submitted["rpc_url"],
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
+            "usage_sequence": int(spending_profile.usage_sequence),
+            "model_id": preview["model_id"],
+            "base_cost_units": int(preview["base_cost_units"]),
+            "service_cost_units": int(preview["service_cost_units"]),
+            "total_charged_units": int(preview["total_charged_units"]),
+        }
+        settlement_db.upsert(request.scope_id, settlement_record)
+
+        return ContractAiUsageSettlementResponse(
+            success=True,
+            scope_id=request.scope_id,
+            user_id=user_id,
+            wallet_address=wallet_address,
+            transaction_signature=submitted["transaction_signature"],
+            rpc_url=submitted["rpc_url"],
+            settlement_record=settlement_record,
+            onchain_ai_usage=preview,
+            detail="AI usage settlement submitted to Solana RPC.",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.get(
+    "/contract/settlements",
+    response_model=ContractSettlementListResponse,
+    tags=["Contract"],
+    summary="Return locally persisted AI usage settlement records for the authenticated wallet",
+)
+async def list_contract_settlements(authorization: Optional[str] = Header(default=None)):
+    """Return local settlement history filtered to the authenticated wallet."""
+    auth_user = _get_authenticated_user(authorization)
+    user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        settlement_db = get_ai_usage_settlement_database()
+        records = settlement_db.list(user_id=user_id, wallet_address=wallet_address)
+        return ContractSettlementListResponse(
+            settlements=[ContractSettlementRecordResponse(**record) for record in records],
+            total=len(records),
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.get(
+    "/contract/settlements/{scope_id}",
+    response_model=ContractSettlementRecordResponse,
+    tags=["Contract"],
+    summary="Return one locally persisted AI usage settlement record with optional on-chain reconciliation",
+)
+async def get_contract_settlement(scope_id: str, authorization: Optional[str] = Header(default=None)):
+    """Return one settlement record and, when possible, its matching on-chain AiUsageRecord."""
+    auth_user = _get_authenticated_user(authorization)
+    user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
+    try:
+        settlement_db = get_ai_usage_settlement_database()
+        record = settlement_db.get(scope_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Settlement record was not found.")
+        if record.get("user_id") and record.get("user_id") != user_id:
+            raise HTTPException(status_code=403, detail="Requested settlement does not belong to the authenticated user.")
+
+        readiness = await get_contract_readiness(wallet_address=wallet_address, user_id=user_id)
+        spending_profile_pda = readiness.get("spending_profile_pda")
+        onchain_record = None
+        onchain_record_pda = None
+        if spending_profile_pda and record.get("usage_sequence") is not None:
+            sdk = get_rabit_contract_sdk()
+            onchain_record = await sdk.get_ai_usage_record(spending_profile_pda, int(record["usage_sequence"]))
+            if onchain_record is not None:
+                deployment = load_deployment(settings.RABIT_CONTRACT_CLUSTER)
+                onchain_record_pda = derive_ai_usage_pda(
+                    spending_profile_pda,
+                    int(record["usage_sequence"]),
+                    cluster=deployment.cluster,
+                    program_id=deployment.program_id,
+                )[0]
+
+        return ContractSettlementRecordResponse(
+            **record,
+            onchain_record_found=onchain_record is not None,
+            onchain_record_pda=onchain_record_pda,
+            onchain_record=_serialize_contract_value(onchain_record),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/model-registry/register",
+    response_model=ContractBackendInstructionResponse,
+    tags=["Contract"],
+    summary="Register one backend model in the on-chain model registry",
+)
+async def register_contract_model(request: ContractModelRegisterRequest):
+    """Submit a backend-signed register_model instruction."""
+    try:
+        authority = _require_contract_authority_signer()
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_register_model_instruction(
+            authority=authority,
+            model_id=request.model_id,
+            provider=request.provider,
+            base_cost_per_token=request.base_cost_per_token,
+            features=request.features,
+        )
+        submitted = await submit_backend_signed_instruction(
+            instruction=instruction,
+            payer=authority,
+            rpc_url=sdk.rpc_url,
+        )
+        return _build_backend_contract_response(
+            action="register_model",
+            instruction_name="register_model",
+            submitted=submitted,
+            metadata={"model_id": request.model_id, "provider": request.provider},
+            detail="On-chain model registry entry registered successfully.",
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/model-registry/update",
+    response_model=ContractBackendInstructionResponse,
+    tags=["Contract"],
+    summary="Update one on-chain model registry entry",
+)
+async def update_contract_model(request: ContractModelUpdateRequest):
+    """Submit a backend-signed update_model instruction."""
+    try:
+        authority = _require_contract_authority_signer()
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_update_model_instruction(
+            authority=authority,
+            model_id=request.model_id,
+            base_cost_per_token=request.base_cost_per_token,
+            is_active=request.is_active,
+            features=request.features,
+            custom_contract=request.custom_contract,
+        )
+        submitted = await submit_backend_signed_instruction(
+            instruction=instruction,
+            payer=authority,
+            rpc_url=sdk.rpc_url,
+        )
+        return _build_backend_contract_response(
+            action="update_model",
+            instruction_name="update_model",
+            submitted=submitted,
+            metadata={"model_id": request.model_id},
+            detail="On-chain model registry entry updated successfully.",
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/model-registry/deactivate",
+    response_model=ContractBackendInstructionResponse,
+    tags=["Contract"],
+    summary="Deactivate one on-chain model registry entry",
+)
+async def deactivate_contract_model(request: ContractModelDeactivateRequest):
+    """Submit a backend-signed deactivate_model instruction."""
+    try:
+        authority = _require_contract_authority_signer()
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_deactivate_model_instruction(
+            authority=authority,
+            model_id=request.model_id,
+        )
+        submitted = await submit_backend_signed_instruction(
+            instruction=instruction,
+            payer=authority,
+            rpc_url=sdk.rpc_url,
+        )
+        return _build_backend_contract_response(
+            action="deactivate_model",
+            instruction_name="deactivate_model",
+            submitted=submitted,
+            metadata={"model_id": request.model_id},
+            detail="On-chain model registry entry deactivated successfully.",
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/admin/update-platform-fee",
+    response_model=ContractBackendInstructionResponse,
+    tags=["Contract"],
+    summary="Update the Rabit contract platform fee basis points",
+)
+async def update_contract_platform_fee(request: ContractAdminUpdatePlatformFeeRequest):
+    """Submit a backend-signed update_platform_fee instruction."""
+    try:
+        authority = _require_contract_authority_signer()
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_update_platform_fee_instruction(
+            authority=authority,
+            new_platform_fee_bps=request.platform_fee_bps,
+        )
+        submitted = await submit_backend_signed_instruction(instruction=instruction, payer=authority, rpc_url=sdk.rpc_url)
+        return _build_backend_contract_response(
+            action="update_platform_fee",
+            instruction_name="update_platform_fee",
+            submitted=submitted,
+            metadata={"platform_fee_bps": request.platform_fee_bps},
+            detail="Contract platform fee updated successfully.",
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/admin/update-default-markup",
+    response_model=ContractBackendInstructionResponse,
+    tags=["Contract"],
+    summary="Update the Rabit contract default markup basis points",
+)
+async def update_contract_default_markup(request: ContractAdminUpdateDefaultMarkupRequest):
+    """Submit a backend-signed update_default_markup instruction."""
+    try:
+        authority = _require_contract_authority_signer()
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_update_default_markup_instruction(
+            authority=authority,
+            new_default_markup_bps=request.default_markup_bps,
+        )
+        submitted = await submit_backend_signed_instruction(instruction=instruction, payer=authority, rpc_url=sdk.rpc_url)
+        return _build_backend_contract_response(
+            action="update_default_markup",
+            instruction_name="update_default_markup",
+            submitted=submitted,
+            metadata={"default_markup_bps": request.default_markup_bps},
+            detail="Contract default markup updated successfully.",
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/admin/update-authority",
+    response_model=ContractBackendInstructionResponse,
+    tags=["Contract"],
+    summary="Update the Rabit contract authority wallet",
+)
+async def update_contract_authority(request: ContractAdminUpdateAuthorityRequest):
+    """Submit a backend-signed update_authority instruction."""
+    try:
+        authority = _require_contract_authority_signer()
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_update_authority_instruction(
+            authority=authority,
+            new_authority=request.new_authority,
+        )
+        submitted = await submit_backend_signed_instruction(instruction=instruction, payer=authority, rpc_url=sdk.rpc_url)
+        return _build_backend_contract_response(
+            action="update_authority",
+            instruction_name="update_authority",
+            submitted=submitted,
+            metadata={"new_authority": request.new_authority},
+            detail="Contract authority updated successfully.",
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/admin/update-backend-authority",
+    response_model=ContractBackendInstructionResponse,
+    tags=["Contract"],
+    summary="Update the Rabit contract backend authority wallet",
+)
+async def update_contract_backend_authority(request: ContractAdminUpdateBackendAuthorityRequest):
+    """Submit a backend-signed update_backend_authority instruction."""
+    try:
+        authority = _require_contract_authority_signer()
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_update_backend_authority_instruction(
+            authority=authority,
+            new_backend_authority=request.new_backend_authority,
+        )
+        submitted = await submit_backend_signed_instruction(instruction=instruction, payer=authority, rpc_url=sdk.rpc_url)
+        return _build_backend_contract_response(
+            action="update_backend_authority",
+            instruction_name="update_backend_authority",
+            submitted=submitted,
+            metadata={"new_backend_authority": request.new_backend_authority},
+            detail="Contract backend authority updated successfully.",
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/admin/toggle-pause",
+    response_model=ContractBackendInstructionResponse,
+    tags=["Contract"],
+    summary="Toggle the Rabit contract paused state",
+)
+async def toggle_contract_pause():
+    """Submit a backend-signed toggle_pause instruction."""
+    try:
+        authority = _require_contract_authority_signer()
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_toggle_pause_instruction(authority=authority)
+        submitted = await submit_backend_signed_instruction(instruction=instruction, payer=authority, rpc_url=sdk.rpc_url)
+        return _build_backend_contract_response(
+            action="toggle_pause",
+            instruction_name="toggle_pause",
+            submitted=submitted,
+            metadata={},
+            detail="Contract pause state toggled successfully.",
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.post(
+    "/contract/admin/claim-fees",
+    response_model=ContractBackendInstructionResponse,
+    tags=["Contract"],
+    summary="Claim lamports from the fee recipient PDA into the authority wallet",
+)
+async def claim_contract_fees(request: ContractClaimFeesRequest):
+    """Submit a backend-signed claim_fees instruction."""
+    try:
+        authority = _require_contract_authority_signer()
+        sdk = get_rabit_contract_sdk()
+        instruction = sdk.build_claim_fees_instruction(authority=authority, amount=request.amount)
+        submitted = await submit_backend_signed_instruction(instruction=instruction, payer=authority, rpc_url=sdk.rpc_url)
+        return _build_backend_contract_response(
+            action="claim_fees",
+            instruction_name="claim_fees",
+            submitted=submitted,
+            metadata={"amount": request.amount},
+            detail="Contract fee recipient lamports claimed successfully.",
+        )
+    except Exception as exc:
+        _raise_contract_execution_http_error(exc)
+
+
+@router.get(
     "/agent/artifacts/{scope_id}",
     response_model=AgentPipelineArtifactListResponse,
     tags=["Agent"],
@@ -723,291 +1860,6 @@ async def get_agent_pipeline_artifacts(
     )
 
 
-@router.post(
-    "/drift/execution/prepare",
-    response_model=DriftExecutionRecordResponse,
-    tags=["Drift"],
-    summary="Prepare same-wallet Drift execution intent",
-)
-async def prepare_drift_execution(
-    request: DriftExecutionPrepareRequest,
-    authorization: Optional[str] = Header(default=None),
-):
-    """Prepare a same-wallet Drift execution request for client-side signing."""
-    _require_drift_execution_api_enabled()
-    auth_user = _get_authenticated_user(authorization)
-    user_id, wallet_address = _require_wallet_authenticated_user(auth_user)
-    execution_wallet = _require_same_wallet_execution_status(user_id)
-
-    market_type = str(request.market_type or "perp").strip().lower()
-    if market_type != "perp":
-        raise HTTPException(
-            status_code=400,
-            detail="Drift v1 execution prepare currently supports market_type='perp' only.",
-        )
-
-    order_intent = {
-        "market_type": market_type,
-        "market_index": request.market_index,
-        "symbol": request.symbol,
-        "side": str(request.side).strip().lower(),
-        "order_type": str(request.order_type).strip().lower(),
-        "base_asset_amount": request.base_asset_amount,
-        "price": request.price,
-        "reduce_only": request.reduce_only,
-        "post_only": request.post_only,
-        "immediate_or_cancel": request.immediate_or_cancel,
-        "client_order_id": request.client_order_id,
-    }
-    try:
-        prepared_transaction = await get_drift_execution_tx_builder().build_place_perp_order_payload(
-            wallet_address=wallet_address,
-            sub_account_id=request.sub_account_id,
-            order_intent=order_intent,
-        )
-        record = get_drift_execution_request_service().create_prepared_request(
-            user_id=user_id,
-            auth_wallet_address=wallet_address,
-            execution_wallet_status=execution_wallet,
-            sub_account_id=request.sub_account_id,
-            order_intent=order_intent,
-            prepared_transaction=prepared_transaction,
-        )
-        return DriftExecutionRecordResponse(**record)
-    except Exception as exc:
-        _raise_drift_execution_http_error(exc)
-
-
-@router.get(
-    "/drift/execution/{execution_id}",
-    response_model=DriftExecutionRecordResponse,
-    tags=["Drift"],
-    summary="Get Drift execution request status",
-)
-async def get_drift_execution_status(
-    execution_id: str,
-    authorization: Optional[str] = Header(default=None),
-):
-    """Return one owned Drift execution request."""
-    auth_user = _get_authenticated_user(authorization)
-    user_id, _wallet_address = _require_wallet_authenticated_user(auth_user)
-    try:
-        record = get_drift_execution_request_service().get_request(
-            user_id=user_id,
-            execution_id=execution_id,
-        )
-        return DriftExecutionRecordResponse(**record)
-    except Exception as exc:
-        _raise_drift_execution_http_error(exc)
-
-
-@router.post(
-    "/drift/execution/submit",
-    response_model=DriftExecutionSubmitResponse,
-    tags=["Drift"],
-    summary="Submit signed same-wallet Drift transaction",
-)
-async def submit_drift_execution(
-    request: DriftExecutionSubmitRequest,
-    authorization: Optional[str] = Header(default=None),
-):
-    """Submit a signed same-wallet Drift transaction to Solana RPC."""
-    _require_drift_execution_api_enabled()
-    auth_user = _get_authenticated_user(authorization)
-    user_id, _wallet_address = _require_wallet_authenticated_user(auth_user)
-    _require_same_wallet_execution_status(user_id)
-
-    service = get_drift_execution_request_service()
-    try:
-        record = service.get_request(user_id=user_id, execution_id=request.execution_id)
-        raw_tx = _decode_signed_transaction(
-            request.signed_transaction,
-            request.transaction_encoding,
-        )
-
-        try:
-            from solana.rpc.async_api import AsyncClient
-            from solana.rpc.types import TxOpts
-        except ImportError as exc:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Submitting signed Drift transactions requires the optional Solana Python client dependency."
-                ),
-            ) from exc
-
-        client = AsyncClient(settings.DRIFT_RPC_URL)
-        try:
-            response = await client.send_raw_transaction(
-                raw_tx,
-                opts=TxOpts(
-                    skip_preflight=request.skip_preflight,
-                    max_retries=request.max_retries,
-                ),
-            )
-        finally:
-            await client.close()
-
-        tx_signature = str(response.value)
-        updated = service.mark_submitted(
-            user_id=user_id,
-            execution_id=request.execution_id,
-            transaction_signature=tx_signature,
-        )
-        return DriftExecutionSubmitResponse(
-            success=True,
-            execution_id=request.execution_id,
-            status=updated["status"],
-            transaction_signature=tx_signature,
-            submitted_at=updated["submitted_at"],
-            rpc_url=settings.DRIFT_RPC_URL,
-            detail="Signed transaction submitted to Solana RPC.",
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        try:
-            service.mark_failed(
-                user_id=user_id,
-                execution_id=request.execution_id,
-                error=str(exc),
-            )
-        except Exception:
-            pass
-        _raise_drift_execution_http_error(exc)
-
-
-# ============================================================================
-# Exchange Connection Endpoints
-# ============================================================================
-
-@router.post(
-    "/exchange-connections/backpack",
-    response_model=ExchangeConnectionResponse,
-    tags=["Exchange Connections"],
-    summary="Create Backpack exchange connection",
-)
-async def create_backpack_exchange_connection(
-    request: ExchangeConnectionCreateRequest,
-    authorization: Optional[str] = Header(default=None),
-):
-    """Create an encrypted Backpack connection owned by one user."""
-    try:
-        auth_user = _get_authenticated_user(authorization)
-        service = get_exchange_connection_service()
-        user_id = _resolve_request_user_id(
-            provided_user_id=request.user_id,
-            auth_user=auth_user,
-        )
-        user_id = _require_resolved_user_id(user_id)
-        record = service.create_connection(
-            user_id=user_id,
-            exchange="backpack",
-            label=request.label,
-            api_key=request.api_key,
-            api_secret=request.api_secret,
-            trading_enabled=request.trading_enabled,
-            read_only=request.read_only,
-            is_active=request.is_active,
-        )
-        return ExchangeConnectionResponse(**record)
-    except Exception as exc:
-        logger.error(f"Error creating Backpack exchange connection: {exc}")
-        _raise_exchange_connection_http_error(exc)
-
-
-@router.get(
-    "/exchange-connections",
-    response_model=ExchangeConnectionListResponse,
-    tags=["Exchange Connections"],
-    summary="List exchange connections",
-)
-async def list_exchange_connections(
-    user_id: Optional[str] = Query(None, description="User ID that owns the connections"),
-    exchange: Optional[str] = Query(None, description="Optional exchange filter"),
-    authorization: Optional[str] = Header(default=None),
-):
-    """List stored exchange connections for one user."""
-    try:
-        auth_user = _get_authenticated_user(authorization)
-        resolved_user_id = _resolve_request_user_id(
-            provided_user_id=user_id,
-            auth_user=auth_user,
-        )
-        resolved_user_id = _require_resolved_user_id(resolved_user_id)
-        service = get_exchange_connection_service()
-        connections = service.list_connections(user_id=resolved_user_id, exchange=exchange)
-        return ExchangeConnectionListResponse(
-            user_id=resolved_user_id,
-            connections=[ExchangeConnectionResponse(**item) for item in connections],
-            total=len(connections),
-        )
-    except Exception as exc:
-        logger.error(f"Error listing exchange connections: {exc}")
-        _raise_exchange_connection_http_error(exc)
-
-
-@router.patch(
-    "/exchange-connections/{connection_id}",
-    response_model=ExchangeConnectionResponse,
-    tags=["Exchange Connections"],
-    summary="Update exchange connection metadata",
-)
-async def update_exchange_connection(
-    connection_id: str,
-    request: ExchangeConnectionUpdateRequest,
-    authorization: Optional[str] = Header(default=None),
-):
-    """Update non-secret metadata for one stored exchange connection."""
-    try:
-        auth_user = _get_authenticated_user(authorization)
-        user_id = _resolve_request_user_id(
-            provided_user_id=request.user_id,
-            auth_user=auth_user,
-        )
-        user_id = _require_resolved_user_id(user_id)
-        service = get_exchange_connection_service()
-        record = service.update_connection(
-            user_id=user_id,
-            connection_id=connection_id,
-            label=request.label,
-            trading_enabled=request.trading_enabled,
-            read_only=request.read_only,
-            is_active=request.is_active,
-        )
-        return ExchangeConnectionResponse(**record)
-    except Exception as exc:
-        logger.error(f"Error updating exchange connection {connection_id}: {exc}")
-        _raise_exchange_connection_http_error(exc)
-
-
-@router.delete(
-    "/exchange-connections/{connection_id}",
-    response_model=ExchangeConnectionDeleteResponse,
-    tags=["Exchange Connections"],
-    summary="Delete exchange connection",
-)
-async def delete_exchange_connection(
-    connection_id: str,
-    user_id: Optional[str] = Query(None, description="User ID that owns the connection"),
-    authorization: Optional[str] = Header(default=None),
-):
-    """Delete one stored exchange connection."""
-    try:
-        auth_user = _get_authenticated_user(authorization)
-        resolved_user_id = _resolve_request_user_id(
-            provided_user_id=user_id,
-            auth_user=auth_user,
-        )
-        resolved_user_id = _require_resolved_user_id(resolved_user_id)
-        service = get_exchange_connection_service()
-        result = service.delete_connection(user_id=resolved_user_id, connection_id=connection_id)
-        return ExchangeConnectionDeleteResponse(**result)
-    except Exception as exc:
-        logger.error(f"Error deleting exchange connection {connection_id}: {exc}")
-        _raise_exchange_connection_http_error(exc)
-
-
 # ============================================================================
 # Assets Endpoints
 # ============================================================================
@@ -1021,7 +1873,8 @@ async def delete_exchange_connection(
 )
 async def get_assets(
     category: Optional[str] = Query(None, description="Filter by category (e.g., 'DeFi', 'Stablecoin')"),
-    limit: Optional[int] = Query(50, description="Maximum number of assets to return")
+    limit: Optional[int] = Query(50, description="Maximum number of assets to return"),
+    exchange: Optional[str] = Query(None, description="Optional exchange source: 'phantom', 'spot', or 'futures'"),
 ):
     """
     Get list of assets with basic price information.
@@ -1034,10 +1887,11 @@ async def get_assets(
     - List of assets with symbol, name, price, and 24h change
     """
     try:
-        assets = await _collect_tracked_assets(category=category, limit=limit)
+        assets = await _collect_tracked_assets(category=category, limit=limit, exchange=exchange)
         
         return {"assets": assets, "total": len(assets)}
-        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in get_assets: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1052,16 +1906,19 @@ async def get_assets(
 )
 async def search_assets(
     q: str = Query(..., min_length=1, description="Search query such as BTC, Bitcoin, or DeFi"),
-    limit: Optional[int] = Query(20, description="Maximum number of results to return")
+    limit: Optional[int] = Query(20, description="Maximum number of results to return"),
+    exchange: Optional[str] = Query(None, description="Optional exchange source: 'phantom', 'spot', or 'futures'"),
 ):
     """Search the tracked asset universe for frontend pickers and discovery flows."""
     try:
-        assets = await _collect_tracked_assets(limit=limit, query=q)
+        assets = await _collect_tracked_assets(limit=limit, query=q, exchange=exchange)
         return AssetSearchResponse(
             query=q,
             assets=[AssetListItem(**item) for item in assets],
             total=len(assets),
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in search_assets: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1074,10 +1931,12 @@ async def search_assets(
     description="List normalized categories currently represented in tracked assets",
     tags=["Assets"]
 )
-async def list_asset_categories():
+async def list_asset_categories(
+    exchange: Optional[str] = Query(None, description="Optional exchange source: 'phantom', 'spot', or 'futures'"),
+):
     """Return available categories for the current tracked asset universe."""
     try:
-        assets = await _collect_tracked_assets(limit=len(settings.TRADING_ASSETS))
+        assets = await _collect_tracked_assets(limit=len(settings.TRADING_ASSETS), exchange=exchange)
         stats = get_category_stats(assets)
         return AssetCategoryListResponse(
             categories=[
@@ -1086,6 +1945,8 @@ async def list_asset_categories():
             ],
             total=len(stats),
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in list_asset_categories: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1101,16 +1962,23 @@ async def list_asset_categories():
 async def list_assets_by_category(
     category: str,
     limit: Optional[int] = Query(50, description="Maximum number of results to return"),
+    exchange: Optional[str] = Query(None, description="Optional exchange source: 'phantom', 'spot', or 'futures'"),
 ):
     """Return assets belonging to one normalized category."""
     try:
         normalized_category = normalize_category(category)
-        assets = await _collect_tracked_assets(category=normalized_category, limit=limit)
+        assets = await _collect_tracked_assets(
+            category=normalized_category,
+            limit=limit,
+            exchange=exchange,
+        )
         return AssetCategoryAssetsResponse(
             category=normalized_category,
             assets=[AssetListItem(**item) for item in assets],
             total=len(assets),
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in list_assets_by_category: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1138,15 +2006,18 @@ async def list_supported_trading_assets():
 )
 async def list_trending_assets(
     limit: Optional[int] = Query(10, description="Maximum number of trending assets to return"),
+    exchange: Optional[str] = Query(None, description="Optional exchange source: 'phantom', 'spot', or 'futures'"),
 ):
     """Return a frontend-friendly trending list from the current tracked asset universe."""
     try:
-        assets = await _collect_trending_assets(limit=limit)
+        assets = await _collect_trending_assets(limit=limit, exchange=exchange)
         return TrendingAssetsResponse(
             assets=[TrendingAssetItem(**item) for item in assets],
             total=len(assets),
             ranking_method="tracked-asset score based on 24h volume and absolute 24h move",
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in list_trending_assets: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1209,10 +2080,23 @@ async def get_asset_summary(
             price=price_update.price,
             change_24h=price_update.change_24h,
             volume_24h=price_update.volume_24h,
+            notional_volume_24h=price_update.notional_volume_24h,
+            base_volume_24h=price_update.base_volume_24h,
             market_cap=price_update.market_cap,
             fdv=price_update.fdv,
             open_interest=price_update.open_interest,
             funding_rate=price_update.funding_rate,
+            oracle_price=price_update.oracle_price,
+            premium=price_update.premium,
+            circulating_supply=price_update.circulating_supply,
+            total_supply=price_update.total_supply,
+            max_leverage=price_update.max_leverage,
+            only_isolated=price_update.only_isolated,
+            market_pair=price_update.market_pair,
+            full_name=price_update.full_name,
+            token_index=price_update.token_index,
+            is_canonical=price_update.is_canonical,
+            source_exchange=price_update.source_exchange,
             primary_category=primary_category,
             categories=coin_info.categories,
             description=coin_info.description,
@@ -1285,12 +2169,25 @@ async def get_asset_detail(symbol: str):
             "price": price_update.price,
             "change_24h": price_update.change_24h,
             "volume_24h": price_update.volume_24h,
+            "notional_volume_24h": price_update.notional_volume_24h,
+            "base_volume_24h": price_update.base_volume_24h,
             "high_24h": price_update.high_24h,
             "low_24h": price_update.low_24h,
             "market_cap": price_update.market_cap,
             "fdv": price_update.fdv,
             "open_interest": price_update.open_interest,
             "funding_rate": price_update.funding_rate,
+            "oracle_price": price_update.oracle_price,
+            "premium": price_update.premium,
+            "circulating_supply": price_update.circulating_supply,
+            "total_supply": price_update.total_supply,
+            "max_leverage": price_update.max_leverage,
+            "only_isolated": price_update.only_isolated,
+            "market_pair": price_update.market_pair,
+            "full_name": price_update.full_name,
+            "token_index": price_update.token_index,
+            "is_canonical": price_update.is_canonical,
+            "source_exchange": price_update.source_exchange,
             "description": coin_info.description,
             "categories": coin_info.categories,
             "links": {
@@ -1419,7 +2316,7 @@ async def get_ohlc_data(
     symbol: str,
     interval: str = Query("1h", description="Interval (1m, 5m, 15m, 1h, 4h, 1d)"),
     limit: int = Query(100, description="Number of candles to return"),
-    source: str = Query("auto", description="Data source: 'backpack', 'binance', or 'auto'")
+    source: str = Query("auto", description="Data source: 'phantom_futures', 'phantom_spot', 'phantom', or 'auto'")
 ):
     """
     Get OHLC data for TradingView chart.
@@ -1428,7 +2325,7 @@ async def get_ohlc_data(
     - `symbol`: Asset symbol (e.g., 'BTC', 'ETH')
     - `interval`: Candle interval (1m, 5m, 15m, 1h, 4h, 1d)
     - `limit`: Number of candles (default: 100, max: 1000)
-    - `source`: Data source ('backpack', 'binance', or 'auto')
+    - `source`: Data source ('phantom_futures', 'phantom_spot', 'phantom', or 'auto')
     
     **Returns:**
     - OHLC data array for charting
@@ -1450,35 +2347,39 @@ async def get_ohlc_data(
         ohlc_data = []
         
         # Determine source
-        if source == "auto":
-            source = "backpack" if settings.uses_price_source("backpack") else "binance"
+        normalized_source = str(source or "auto").strip().lower()
+        if normalized_source == "auto":
+            normalized_source = "phantom_futures"
+        elif normalized_source == "phantom":
+            normalized_source = "phantom_futures"
+        elif normalized_source not in {"phantom_futures", "phantom_spot"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid source. Must be one of: phantom_futures, phantom_spot, phantom, auto",
+            )
 
         # Try to get from WebSocket handler first (real-time data)
-        if source in {"backpack", "both"} and settings.uses_price_source("backpack"):
+        if normalized_source in {"phantom_futures", "phantom_spot"} and settings.uses_price_source("phantom"):
             from main import market_handler
-            ohlc_data = market_handler.get_ohlc(symbol, interval=interval, limit=limit)
+            market_handler_exchange = normalized_source
+            ohlc_data = market_handler.db.get_candles(symbol, market_handler_exchange, interval, limit=limit) if getattr(market_handler, "db", None) else []
             
-            # If not enough data from WebSocket, fallback to Binance
-            if len(ohlc_data) < limit:
-                logger.info(f"Not enough OHLC data from Backpack, falling back to Binance")
-                source = "binance"
-        
-        # Get from Binance if needed
-        if not ohlc_data or source == "binance":
-            downloader = BinanceHistoryDownloader()
-            binance_data = await downloader.download_history(
+        # If the live cache is missing or incomplete, fallback to Hyperliquid snapshots.
+        if len(ohlc_data) < limit:
+            logger.info("Not enough OHLC data from Phantom live handler, falling back to Hyperliquid snapshot")
+            downloader = HyperliquidHistoryDownloader()
+            ohlc_data = await downloader.download_history(
                 symbol=symbol,
                 interval=interval,
-                limit=limit
+                limit=limit,
+                market_source=normalized_source,
             )
-            
-            if not binance_data:
+
+            if not ohlc_data:
                 raise HTTPException(
                     status_code=404,
                     detail=f"OHLC data for '{symbol}' not available"
                 )
-            
-            ohlc_data = binance_data
         
         return {
             "symbol": symbol,
@@ -1529,6 +2430,7 @@ async def _collect_tracked_assets(
     category: Optional[str] = None,
     limit: Optional[int] = 50,
     query: Optional[str] = None,
+    exchange: Optional[str] = None,
 ) -> List[dict]:
     """Build one filtered list from tracked backend assets."""
     from main import market_handler
@@ -1537,12 +2439,13 @@ async def _collect_tracked_assets(
     symbols = settings.TRADING_ASSETS
     max_items = len(symbols) if limit is None else max(0, int(limit))
     normalized_query = str(query or "").strip().lower()
+    normalized_exchange = _normalize_exchange_filter(exchange)
 
     assets = []
     for symbol in symbols[:max_items]:
         try:
             coin_info = await service.get_coin_info(symbol)
-            price_update = market_handler.get_price(symbol)
+            price_update = market_handler.get_price(symbol, exchange=normalized_exchange)
 
             if not coin_info or not price_update:
                 continue
@@ -1575,18 +2478,22 @@ async def _collect_tracked_assets(
     return assets
 
 
-async def _collect_trending_assets(limit: Optional[int] = 10) -> List[dict]:
+async def _collect_trending_assets(
+    limit: Optional[int] = 10,
+    exchange: Optional[str] = None,
+) -> List[dict]:
     """Build a lightweight trending ranking from tracked assets."""
     from main import market_handler
 
     service = get_market_service()
     ranked = []
     max_items = max(0, int(limit or 0))
+    normalized_exchange = _normalize_exchange_filter(exchange)
 
     for symbol in settings.TRADING_ASSETS:
         try:
             coin_info = await service.get_coin_info(symbol)
-            price_update = market_handler.get_price(symbol)
+            price_update = market_handler.get_price(symbol, exchange=normalized_exchange)
             if not coin_info or not price_update:
                 continue
 
@@ -1707,6 +2614,23 @@ async def websocket_prices(websocket: WebSocket):
                 "price": price_update.price,
                 "change_24h": price_update.change_24h,
                 "volume_24h": price_update.volume_24h,
+                "notional_volume_24h": price_update.notional_volume_24h,
+                "base_volume_24h": price_update.base_volume_24h,
+                "open_interest": price_update.open_interest,
+                "funding_rate": price_update.funding_rate,
+                "oracle_price": price_update.oracle_price,
+                "premium": price_update.premium,
+                "market_cap": price_update.market_cap,
+                "fdv": price_update.fdv,
+                "circulating_supply": price_update.circulating_supply,
+                "total_supply": price_update.total_supply,
+                "max_leverage": price_update.max_leverage,
+                "only_isolated": price_update.only_isolated,
+                "market_pair": price_update.market_pair,
+                "full_name": price_update.full_name,
+                "token_index": price_update.token_index,
+                "is_canonical": price_update.is_canonical,
+                "source_exchange": price_update.source_exchange,
                 "timestamp": price_update.timestamp.isoformat()
             })
         except Exception as e:
@@ -1961,7 +2885,7 @@ async def upload_agent_attachment(file: UploadFile = File(...)):
 
 @router.delete(
     "/agent/uploads/{file_id}",
-    response_model=AgentUploadDeleteResponse,
+    response_model=AgentSessionDeleteResponse,
     summary="Delete temporary agent attachment",
     tags=["Agent"],
 )
@@ -1972,6 +2896,133 @@ async def delete_agent_attachment(file_id: str):
         raise HTTPException(status_code=404, detail=f"Attachment '{file_id}' not found")
 
     return AgentUploadDeleteResponse(success=True, file_id=file_id)
+
+
+@router.get(
+    "/agent/sessions",
+    response_model=AgentSessionListResponse,
+    summary="List persisted assist sessions for the authenticated user",
+    tags=["Agent"],
+)
+async def list_agent_sessions(
+    user_id: Optional[str] = Query(default=None, description="Optional explicit user ID override"),
+    authorization: Optional[str] = Header(default=None),
+):
+    """Return persisted assist sessions for one authenticated user."""
+    auth_user = _get_authenticated_user(authorization)
+    resolved_user_id = _require_resolved_user_id(
+        _resolve_request_user_id(provided_user_id=user_id, auth_user=auth_user)
+    )
+
+    sessions = get_conversation_database().list_sessions(user_id=resolved_user_id)
+    serialized = [_serialize_agent_session_summary(item) for item in sessions]
+    return AgentSessionListResponse(sessions=serialized, total=len(serialized))
+
+
+@router.get(
+    "/agent/sessions/{scope_id}",
+    response_model=AgentSessionDetailResponse,
+    summary="Load one persisted assist session",
+    tags=["Agent"],
+)
+async def get_agent_session(
+    scope_id: str,
+    user_id: Optional[str] = Query(default=None, description="Optional explicit user ID override"),
+    authorization: Optional[str] = Header(default=None),
+):
+    """Return one persisted assist session for the authenticated user."""
+    auth_user = _get_authenticated_user(authorization)
+    resolved_user_id = _require_resolved_user_id(
+        _resolve_request_user_id(provided_user_id=user_id, auth_user=auth_user)
+    )
+
+    session = get_conversation_database().get_session_record(scope_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session '{scope_id}' not found.")
+
+    metadata = session.get("metadata", {}) or {}
+    if metadata.get("user_id") != resolved_user_id:
+        raise HTTPException(status_code=403, detail="Requested session does not belong to the authenticated user.")
+
+    messages = [
+        AgentSessionMessageResponse(
+            role=item.get("role", "assistant"),
+            content=item.get("content", ""),
+            timestamp=item.get("timestamp", ""),
+        )
+        for item in session.get("messages", [])
+    ]
+    summary = _serialize_agent_session_summary(
+        get_conversation_database().build_session_summary(scope_id, session)
+    )
+    return AgentSessionDetailResponse(
+        **summary.model_dump(),
+        messages=messages,
+        metadata=metadata,
+    )
+
+
+@router.patch(
+    "/agent/sessions/{scope_id}",
+    response_model=AgentSessionSummaryResponse,
+    summary="Rename one persisted assist session",
+    tags=["Agent"],
+)
+async def update_agent_session(
+    scope_id: str,
+    request: AgentSessionUpdateRequest,
+    user_id: Optional[str] = Query(default=None, description="Optional explicit user ID override"),
+    authorization: Optional[str] = Header(default=None),
+):
+    """Rename one persisted assist session for the authenticated user."""
+    auth_user = _get_authenticated_user(authorization)
+    resolved_user_id = _require_resolved_user_id(
+        _resolve_request_user_id(provided_user_id=user_id, auth_user=auth_user)
+    )
+    normalized_title = request.title.strip()
+    if not normalized_title:
+        raise HTTPException(status_code=400, detail="Session title cannot be empty.")
+
+    database = get_conversation_database()
+    session = database.get_session_record(scope_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session '{scope_id}' not found.")
+    metadata = session.get("metadata", {}) or {}
+    if metadata.get("user_id") != resolved_user_id:
+        raise HTTPException(status_code=403, detail="Requested session does not belong to the authenticated user.")
+
+    database.update_session_metadata(scope_id, {"title": normalized_title, "user_id": resolved_user_id})
+    updated = database.get_session_record(scope_id)
+    return _serialize_agent_session_summary(database.build_session_summary(scope_id, updated or session))
+
+
+@router.delete(
+    "/agent/sessions/{scope_id}",
+    response_model=AgentSessionDeleteResponse,
+    summary="Delete one persisted assist session",
+    tags=["Agent"],
+)
+async def delete_agent_session(
+    scope_id: str,
+    user_id: Optional[str] = Query(default=None, description="Optional explicit user ID override"),
+    authorization: Optional[str] = Header(default=None),
+):
+    """Delete one persisted assist session for the authenticated user."""
+    auth_user = _get_authenticated_user(authorization)
+    resolved_user_id = _require_resolved_user_id(
+        _resolve_request_user_id(provided_user_id=user_id, auth_user=auth_user)
+    )
+
+    database = get_conversation_database()
+    session = database.get_session_record(scope_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session '{scope_id}' not found.")
+    metadata = session.get("metadata", {}) or {}
+    if metadata.get("user_id") != resolved_user_id:
+        raise HTTPException(status_code=403, detail="Requested session does not belong to the authenticated user.")
+
+    database.delete_session(scope_id)
+    return AgentSessionDeleteResponse(success=True, scope_id=scope_id)
 
 
 @router.post(
@@ -1989,20 +3040,34 @@ async def chat_with_agent(
 
     try:
         auth_user = _get_authenticated_user(authorization)
+        await _require_contract_chat_ready(auth_user)
         attachments = upload_manager.resolve_attachments(request.attachment_ids)
         resolved_user_id = _resolve_request_user_id(
             provided_user_id=request.user_id,
             auth_user=auth_user,
         )
-        agent = get_agent(scope_id=request.scope_id, user_id=resolved_user_id)
+        tool_preferences = request.tool_preferences.model_dump() if request.tool_preferences else None
+        normalized_tool_preferences = normalize_tool_preferences(tool_preferences)
+        effective_memory_user_id = (
+            resolved_user_id if normalized_tool_preferences.get("memory_enabled", True) else None
+        )
+        execution_gate = normalize_execution_gate(
+            request.execution_gate.model_dump() if request.execution_gate else None
+        )
+        agent = get_agent(scope_id=request.scope_id, user_id=effective_memory_user_id)
         response = await agent.process_trading_query(
             request.message,
             attachments=attachments,
             conversation_style=request.conversation_style,
             trading_style=request.trading_style,
             market_context=request.market_context.model_dump() if request.market_context else None,
-            backpack_execution=request.backpack_execution.model_dump() if request.backpack_execution else None,
-            drift_execution=request.drift_execution.model_dump() if request.drift_execution else None,
+            execution_gate=execution_gate,
+            tool_preferences=tool_preferences,
+        )
+        _persist_agent_session_metadata(
+            scope_id=request.scope_id,
+            request=request,
+            user_id=resolved_user_id,
         )
 
         return AgentChatResponse(
@@ -2012,18 +3077,18 @@ async def chat_with_agent(
             conversation_style=_serialize_conversation_style(agent.last_conversation_style),
             trading_style=_serialize_trading_style(agent.last_trading_style),
             market_context=_serialize_market_context(getattr(agent, "last_market_context", request.market_context)),
-            backpack_execution=_serialize_backpack_execution(
+            execution_gate=_serialize_execution_gate(
                 getattr(
                     agent,
-                    "last_backpack_execution",
-                    request.backpack_execution.model_dump() if request.backpack_execution else None,
+                    "last_execution_gate",
+                    execution_gate,
                 )
             ),
-            drift_execution=_serialize_drift_execution(
+            tool_preferences=_serialize_tool_preferences(
                 getattr(
                     agent,
-                    "last_drift_execution",
-                    request.drift_execution.model_dump() if request.drift_execution else None,
+                    "last_tool_preferences",
+                    tool_preferences,
                 )
             ),
             attachment_ids=request.attachment_ids,
@@ -2045,6 +3110,8 @@ async def chat_with_agent(
         )
     except UploadValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Error in agent chat endpoint: {exc}")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -2062,6 +3129,7 @@ async def stream_chat_with_agent(
     """Stream agent output, thinking summary, plan, hint, and error events over SSE."""
 
     auth_user = _get_authenticated_user(authorization)
+    await _require_contract_chat_ready(auth_user)
     resolved_user_id = _resolve_request_user_id(
         provided_user_id=request.user_id,
         auth_user=auth_user,
@@ -2078,7 +3146,15 @@ async def stream_chat_with_agent(
             try:
                 upload_manager = get_upload_manager()
                 attachments = upload_manager.resolve_attachments(request.attachment_ids)
-                agent = get_agent(scope_id=request.scope_id, user_id=resolved_user_id)
+                tool_preferences = request.tool_preferences.model_dump() if request.tool_preferences else None
+                normalized_tool_preferences = normalize_tool_preferences(tool_preferences)
+                effective_memory_user_id = (
+                    resolved_user_id if normalized_tool_preferences.get("memory_enabled", True) else None
+                )
+                execution_gate = normalize_execution_gate(
+                    request.execution_gate.model_dump() if request.execution_gate else None
+                )
+                agent = get_agent(scope_id=request.scope_id, user_id=effective_memory_user_id)
 
                 response = await agent.process_stream(
                     request.message,
@@ -2088,8 +3164,13 @@ async def stream_chat_with_agent(
                     conversation_style=request.conversation_style,
                     trading_style=request.trading_style,
                     market_context=request.market_context.model_dump() if request.market_context else None,
-                    backpack_execution=request.backpack_execution.model_dump() if request.backpack_execution else None,
-                    drift_execution=request.drift_execution.model_dump() if request.drift_execution else None,
+                    execution_gate=execution_gate,
+                    tool_preferences=tool_preferences,
+                )
+                _persist_agent_session_metadata(
+                    scope_id=request.scope_id,
+                    request=request,
+                    user_id=resolved_user_id,
                 )
 
                 await emit(
@@ -2113,19 +3194,15 @@ async def stream_chat_with_agent(
                                 request.market_context.model_dump() if request.market_context else None,
                             )
                         ),
-                        "backpack_execution": _serialize_backpack_execution(
+                        "execution_gate": _serialize_execution_gate(
                             getattr(
                                 agent,
-                                "last_backpack_execution",
-                                request.backpack_execution.model_dump() if request.backpack_execution else None,
+                                "last_execution_gate",
+                                execution_gate,
                             )
                         ),
-                        "drift_execution": _serialize_drift_execution(
-                            getattr(
-                                agent,
-                                "last_drift_execution",
-                                request.drift_execution.model_dump() if request.drift_execution else None,
-                            )
+                        "tool_preferences": _serialize_tool_preferences(
+                            getattr(agent, "last_tool_preferences", tool_preferences)
                         ),
                         "attachment_ids": request.attachment_ids,
                         "intent": _serialize_agent_intent(agent),
@@ -2173,18 +3250,11 @@ async def stream_chat_with_agent(
                                 request.market_context.model_dump() if request.market_context else None,
                             )
                         ),
-                        "backpack_execution": _serialize_backpack_execution(
+                        "execution_gate": _serialize_execution_gate(
                             getattr(
                                 agent,
-                                "last_backpack_execution",
-                                request.backpack_execution.model_dump() if request.backpack_execution else None,
-                            )
-                        ),
-                        "drift_execution": _serialize_drift_execution(
-                            getattr(
-                                agent,
-                                "last_drift_execution",
-                                request.drift_execution.model_dump() if request.drift_execution else None,
+                                "last_execution_gate",
+                                execution_gate if 'execution_gate' in locals() else None,
                             )
                         ),
                         "intent": _serialize_agent_intent(agent),
@@ -2235,18 +3305,11 @@ async def stream_chat_with_agent(
                                 request.market_context.model_dump() if request.market_context else None,
                             )
                         ),
-                        "backpack_execution": _serialize_backpack_execution(
+                        "execution_gate": _serialize_execution_gate(
                             getattr(
                                 agent,
-                                "last_backpack_execution",
-                                request.backpack_execution.model_dump() if request.backpack_execution else None,
-                            )
-                        ),
-                        "drift_execution": _serialize_drift_execution(
-                            getattr(
-                                agent,
-                                "last_drift_execution",
-                                request.drift_execution.model_dump() if request.drift_execution else None,
+                                "last_execution_gate",
+                                execution_gate if 'execution_gate' in locals() else None,
                             )
                         ),
                         "intent": _serialize_agent_intent(agent),
@@ -2366,16 +3429,28 @@ async def list_models(
             provider=provider,
             enabled_only=enabled_only
         )
+        onchain_snapshot = await _get_onchain_model_registry_snapshot(
+            force_refresh=refresh,
+        )
         
         # Get stats
         stats = models_manager.get_stats()
         
         return ModelsListResponse(
-            models=[ModelInfoResponse(**m.model_dump()) for m in filtered_models],
+            models=[
+                _serialize_model_info_response(m, onchain_snapshot)
+                for m in filtered_models
+            ],
             total=len(filtered_models),
             enabled=len([m for m in filtered_models if m.enabled]),
             disabled=len([m for m in filtered_models if not m.enabled]),
-            last_updated=stats.get("last_updated")
+            last_updated=stats.get("last_updated"),
+            onchain_available=onchain_snapshot.available,
+            onchain_registered_models=onchain_snapshot.total_registered,
+            onchain_active_models=onchain_snapshot.total_active,
+            onchain_verified_models=onchain_snapshot.total_verified,
+            onchain_last_updated=onchain_snapshot.last_updated,
+            onchain_error=onchain_snapshot.error,
         )
     
     except Exception as e:
@@ -2395,8 +3470,17 @@ async def get_models_stats():
         await models_manager.fetch_models()
         
         stats = models_manager.get_stats()
+        onchain_snapshot = await _get_onchain_model_registry_snapshot()
         
-        return ModelStatsResponse(**stats)
+        return ModelStatsResponse(
+            **stats,
+            onchain_available=onchain_snapshot.available,
+            onchain_registered_models=onchain_snapshot.total_registered,
+            onchain_active_models=onchain_snapshot.total_active,
+            onchain_verified_models=onchain_snapshot.total_verified,
+            onchain_last_updated=onchain_snapshot.last_updated,
+            onchain_error=onchain_snapshot.error,
+        )
     
     except Exception as e:
         logger.error(f"Error getting model stats: {str(e)}")
@@ -2419,7 +3503,8 @@ async def get_model_info(model_id: str):
         if not model:
             raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
         
-        return ModelInfoResponse(**model.model_dump())
+        onchain_snapshot = await _get_onchain_model_registry_snapshot()
+        return _serialize_model_info_response(model, onchain_snapshot)
     
     except HTTPException:
         raise
@@ -2508,6 +3593,7 @@ async def get_models_grouped(
         
         # Fetch models (uses cache automatically)
         await models_manager.fetch_models()
+        onchain_snapshot = await _get_onchain_model_registry_snapshot()
         
         # Filter first if needed
         if require_tools or require_reasoning:
@@ -2522,13 +3608,18 @@ async def get_models_grouped(
                 provider = model.provider
                 if provider not in grouped:
                     grouped[provider] = []
-                grouped[provider].append(ModelInfoResponse(**model.model_dump()))
+                grouped[provider].append(
+                    _serialize_model_info_response(model, onchain_snapshot)
+                )
             grouped = dict(sorted(grouped.items()))
         else:
             # Use built-in grouping
             grouped_models = models_manager.get_models_by_provider(enabled_only=enabled_only)
             grouped = {
-                provider: [ModelInfoResponse(**m.model_dump()) for m in models]
+                provider: [
+                    _serialize_model_info_response(m, onchain_snapshot)
+                    for m in models
+                ]
                 for provider, models in grouped_models.items()
             }
         
@@ -2544,7 +3635,13 @@ async def get_models_grouped(
         return {
             "grouped": grouped,
             "provider_stats": provider_stats,
-            "total_providers": len(grouped)
+            "total_providers": len(grouped),
+            "onchain_available": onchain_snapshot.available,
+            "onchain_registered_models": onchain_snapshot.total_registered,
+            "onchain_active_models": onchain_snapshot.total_active,
+            "onchain_verified_models": onchain_snapshot.total_verified,
+            "onchain_last_updated": onchain_snapshot.last_updated,
+            "onchain_error": onchain_snapshot.error,
         }
     
     except Exception as e:
@@ -2561,8 +3658,17 @@ async def get_database_stats():
         
         db = get_models_database()
         stats = db.get_stats()
+        onchain_snapshot = await _get_onchain_model_registry_snapshot()
         
-        return stats
+        return {
+            **stats,
+            "onchain_available": onchain_snapshot.available,
+            "onchain_registered_models": onchain_snapshot.total_registered,
+            "onchain_active_models": onchain_snapshot.total_active,
+            "onchain_verified_models": onchain_snapshot.total_verified,
+            "onchain_last_updated": onchain_snapshot.last_updated,
+            "onchain_error": onchain_snapshot.error,
+        }
     
     except Exception as e:
         logger.error(f"Error getting database stats: {str(e)}")

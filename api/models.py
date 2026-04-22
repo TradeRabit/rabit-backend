@@ -104,6 +104,8 @@ class AssetDetailResponse(BaseModel):
     price: float
     change_24h: Optional[float] = None
     volume_24h: Optional[float] = None
+    notional_volume_24h: Optional[float] = None
+    base_volume_24h: Optional[float] = None
     high_24h: Optional[float] = None
     low_24h: Optional[float] = None
     
@@ -112,6 +114,17 @@ class AssetDetailResponse(BaseModel):
     fdv: Optional[float] = None
     open_interest: Optional[float] = None
     funding_rate: Optional[float] = None
+    oracle_price: Optional[float] = None
+    premium: Optional[float] = None
+    circulating_supply: Optional[float] = None
+    total_supply: Optional[float] = None
+    max_leverage: Optional[float] = None
+    only_isolated: Optional[bool] = None
+    market_pair: Optional[str] = None
+    full_name: Optional[str] = None
+    token_index: Optional[int] = None
+    is_canonical: Optional[bool] = None
+    source_exchange: Optional[str] = None
     
     # Static info
     description: Optional[str] = None
@@ -130,10 +143,23 @@ class AssetSummaryResponse(BaseModel):
     price: float
     change_24h: Optional[float] = None
     volume_24h: Optional[float] = None
+    notional_volume_24h: Optional[float] = None
+    base_volume_24h: Optional[float] = None
     market_cap: Optional[float] = None
     fdv: Optional[float] = None
     open_interest: Optional[float] = None
     funding_rate: Optional[float] = None
+    oracle_price: Optional[float] = None
+    premium: Optional[float] = None
+    circulating_supply: Optional[float] = None
+    total_supply: Optional[float] = None
+    max_leverage: Optional[float] = None
+    only_isolated: Optional[bool] = None
+    market_pair: Optional[str] = None
+    full_name: Optional[str] = None
+    token_index: Optional[int] = None
+    is_canonical: Optional[bool] = None
+    source_exchange: Optional[str] = None
     primary_category: Optional[str] = None
     categories: List[str] = Field(default_factory=list)
     description: Optional[str] = None
@@ -181,6 +207,14 @@ class ModelInfoResponse(BaseModel):
     modality: Optional[str] = None
     tokenizer: Optional[str] = None
     enabled: bool
+    onchain_registered: bool = False
+    onchain_model_id: Optional[str] = None
+    onchain_model_registry_pda: Optional[str] = None
+    onchain_is_active: Optional[bool] = None
+    onchain_is_verified: Optional[bool] = None
+    onchain_base_cost_per_token: Optional[int] = None
+    onchain_custom_contract: Optional[str] = None
+    onchain_sync_error: Optional[str] = None
 
 
 class ModelsListResponse(BaseModel):
@@ -190,6 +224,12 @@ class ModelsListResponse(BaseModel):
     enabled: int
     disabled: int
     last_updated: Optional[str] = None
+    onchain_available: Optional[bool] = None
+    onchain_registered_models: Optional[int] = None
+    onchain_active_models: Optional[int] = None
+    onchain_verified_models: Optional[int] = None
+    onchain_last_updated: Optional[str] = None
+    onchain_error: Optional[str] = None
 
 
 class ModelStatsResponse(BaseModel):
@@ -201,6 +241,12 @@ class ModelStatsResponse(BaseModel):
     models_with_reasoning: int
     providers: Dict[str, Dict[str, int]] = Field(default_factory=dict, description="Statistics grouped by provider")
     last_updated: Optional[str] = None
+    onchain_available: Optional[bool] = None
+    onchain_registered_models: Optional[int] = None
+    onchain_active_models: Optional[int] = None
+    onchain_verified_models: Optional[int] = None
+    onchain_last_updated: Optional[str] = None
+    onchain_error: Optional[str] = None
 
 
 class ModelToggleRequest(BaseModel):
@@ -281,106 +327,38 @@ class AssetNewsResponse(BaseModel):
     total: int
 
 
-class AgentBackpackExecutionContext(BaseModel):
-    """Optional Backpack execution gate supplied by the frontend."""
+class AgentExecutionGateContext(BaseModel):
+    """Generic execution gate supplied by the frontend."""
 
     enabled: bool = Field(
         default=False,
-        description="Whether live Backpack trade execution is enabled for this request",
+        description="Whether live execution is enabled for this request",
     )
     exchange: str = Field(
-        default="backpack",
-        description="Execution exchange identifier. Reserved for Backpack v1.",
+        default="phantom",
+        description="Execution venue identifier. The backend normalizes this into the Phantom-first runtime.",
     )
 
 
-class AgentDriftExecutionContext(BaseModel):
-    """Optional Drift execution gate supplied by the frontend."""
+class AgentToolPreferences(BaseModel):
+    """Frontend toggles controlling assist tool behavior for one request."""
 
-    enabled: bool = Field(
+    web_search_enabled: bool = Field(
+        default=True,
+        description="Whether web/news research tools are allowed for this request",
+    )
+    memory_enabled: bool = Field(
+        default=True,
+        description="Whether Mem0-backed long-term memory is allowed for this request",
+    )
+    plan_enabled: bool = Field(
+        default=True,
+        description="Whether structured planning behavior is enabled for this request",
+    )
+    auto_execute_enabled: bool = Field(
         default=False,
-        description="Whether live Drift trade execution is enabled for this request",
+        description="Whether live exchange execution can be attempted for this request",
     )
-    exchange: str = Field(
-        default="drift",
-        description="Execution exchange identifier. Reserved for Drift v1.",
-    )
-
-
-class DriftExecutionWalletResponse(BaseModel):
-    """Resolved Drift execution-wallet status for one authenticated user."""
-
-    mode: str = Field(default="same_wallet")
-    auth_wallet_address: Optional[str] = None
-    execution_wallet_address: Optional[str] = None
-    verified: bool = False
-    same_wallet_required: bool = True
-    linked_wallet_supported: bool = False
-    backend_held_signer_enabled: bool = False
-    notes: List[str] = Field(default_factory=list)
-
-
-class DriftExecutionPrepareRequest(BaseModel):
-    """Prepare a same-wallet Drift execution intent for client-side signing."""
-
-    sub_account_id: int = Field(default=0, description="Drift subaccount index")
-    market_type: str = Field(default="perp", description="Drift market type. v1 defaults to perp.")
-    market_index: Optional[int] = Field(default=None, description="Optional Drift market index")
-    symbol: Optional[str] = Field(default=None, description="Optional market symbol such as SOL-PERP")
-    side: str = Field(..., description="Order side such as long, short, buy, or sell")
-    order_type: str = Field(..., description="Order type such as limit or market")
-    base_asset_amount: str = Field(..., description="Base asset amount as a string to preserve precision")
-    price: Optional[str] = Field(default=None, description="Optional price for limit-style orders")
-    reduce_only: bool = Field(default=False, description="Optional reduce-only flag")
-    post_only: bool = Field(default=False, description="Optional post-only flag")
-    immediate_or_cancel: bool = Field(default=False, description="Optional IOC flag")
-    client_order_id: Optional[int] = Field(default=None, description="Optional client order ID")
-
-
-class DriftExecutionRecordResponse(BaseModel):
-    """Prepared or submitted Drift execution record."""
-
-    execution_id: str
-    status: str
-    mode: str
-    user_id: str
-    auth_wallet_address: str
-    execution_wallet_address: str
-    same_wallet_required: bool = True
-    sub_account_id: int
-    order_intent: Dict[str, Any] = Field(default_factory=dict)
-    requires_client_signature: bool = True
-    prepared_transaction: Dict[str, Any] = Field(default_factory=dict)
-    prepared_at: str
-    expires_at: str
-    submitted_at: Optional[str] = None
-    transaction_signature: Optional[str] = None
-    last_error: Optional[str] = None
-
-
-class DriftExecutionSubmitRequest(BaseModel):
-    """Submit a signed same-wallet Drift transaction."""
-
-    execution_id: str = Field(..., description="Prepared Drift execution request ID")
-    signed_transaction: str = Field(..., description="Signed transaction bytes encoded as base64 or base58")
-    transaction_encoding: str = Field(
-        default="base64",
-        description="Signed transaction encoding: base64 (default) or base58",
-    )
-    skip_preflight: bool = Field(default=False, description="Whether to skip preflight on submit")
-    max_retries: Optional[int] = Field(default=None, description="Optional Solana send max_retries")
-
-
-class DriftExecutionSubmitResponse(BaseModel):
-    """Submission response for a signed same-wallet Drift transaction."""
-
-    success: bool
-    execution_id: str
-    status: str
-    transaction_signature: Optional[str] = None
-    submitted_at: Optional[str] = None
-    rpc_url: str
-    detail: Optional[str] = None
 
 
 class AgentChatRequest(BaseModel):
@@ -404,13 +382,13 @@ class AgentChatRequest(BaseModel):
         default=None,
         description="Optional frontend market scope and market-state context",
     )
-    backpack_execution: Optional[AgentBackpackExecutionContext] = Field(
+    execution_gate: Optional[AgentExecutionGateContext] = Field(
         default=None,
-        description="Optional frontend gate controlling whether Backpack live execution is allowed",
+        description="Optional Phantom-first live execution gate for this request.",
     )
-    drift_execution: Optional[AgentDriftExecutionContext] = Field(
+    tool_preferences: Optional[AgentToolPreferences] = Field(
         default=None,
-        description="Optional frontend gate controlling whether Drift live execution is allowed",
+        description="Optional frontend tool toggles such as web search, memory, planning, and auto execution",
     )
     attachment_ids: List[str] = Field(default_factory=list, description="Temporary uploaded file IDs")
 
@@ -463,6 +441,45 @@ class MonitoringCostSummaryResponse(BaseModel):
     updated_at: Optional[str] = None
 
 
+class OnchainAiUsagePreviewResponse(BaseModel):
+    """Contract-aligned AI usage settlement preview derived from backend USD summaries."""
+
+    scope_id: str
+    user_id: Optional[str] = None
+    cluster: str
+    program_id: str
+    config_pda: str
+    fee_recipient_pda: str
+    backend_authority_wallet: Optional[str] = None
+    owner_wallet_address: Optional[str] = None
+    spending_profile_pda: Optional[str] = None
+    delegated_signer_pda: Optional[str] = None
+    payment_mint: Optional[str] = None
+    payment_token_symbol: str = "USDC"
+    payment_mint_decimals: int = 6
+    payment_token_usd_price: float = 1.0
+    usage_type: str = "text"
+    tokens_used: int = 0
+    model_ids: List[str] = Field(default_factory=list)
+    model_id: Optional[str] = None
+    model_registry_pda: Optional[str] = None
+    model_cost_usd: float = 0.0
+    service_cost_usd: float = 0.0
+    total_cost_usd: float = 0.0
+    base_cost_units: int = 0
+    service_cost_units: int = 0
+    chargeable_cost_units: int = 0
+    markup_bps: int = 0
+    markup_amount_units: int = 0
+    platform_fee_bps: int = 0
+    platform_fee_amount_units: int = 0
+    total_charged_units: int = 0
+    instruction_buildable: bool = False
+    instruction_name: Optional[str] = None
+    preview_mode: str = "aggregate_scope_preview"
+    notes: List[str] = Field(default_factory=list)
+
+
 class ServiceCostSummaryResponse(BaseModel):
     """Combined backend service cost for one scope_id session."""
 
@@ -474,8 +491,249 @@ class ServiceCostSummaryResponse(BaseModel):
     total_cost_usd: float = 0.0
     session_cost: Optional[OpenRouterSessionCostResponse] = None
     monitoring_cost: Optional[MonitoringCostSummaryResponse] = None
+    onchain_ai_usage: Optional[OnchainAiUsagePreviewResponse] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+class ContractReadinessResponse(BaseModel):
+    """Current on-chain setup and balance readiness for one wallet-authenticated user."""
+
+    user_id: Optional[str] = None
+    wallet_address: str
+    cluster: str
+    program_id: str
+    backend_authority_wallet: Optional[str] = None
+    backend_signer_ready: bool = False
+    backend_signer_pubkey: Optional[str] = None
+    payment_mint: str
+    payment_token_symbol: str = "USDC"
+    payment_mint_decimals: int = 6
+    payment_token_usd_price: float = 1.0
+    minimum_balance_usd: float = 1.0
+    user_token_account: str
+    fee_recipient_token_account: str
+    user_token_account_exists: bool = False
+    fee_recipient_token_account_exists: bool = False
+    payment_balance_amount: int = 0
+    payment_balance_ui_amount: float = 0.0
+    payment_balance_usd: float = 0.0
+    balance_ok: bool = False
+    spending_profile_pda: Optional[str] = None
+    spending_profile_exists: bool = False
+    spending_profile_usage_sequence: Optional[int] = None
+    spending_profile_payment_mint: Optional[str] = None
+    delegated_signer_pda: Optional[str] = None
+    delegated_signer_exists: bool = False
+    delegated_signer_active: bool = False
+    delegated_signer_expired: bool = False
+    delegated_signer_expires_at: Optional[int] = None
+    delegated_signer_spending_limit: Optional[int] = None
+    setup_complete: bool = False
+    can_chat: bool = False
+    notes: List[str] = Field(default_factory=list)
+
+
+class ContractSetupTransactionResponse(BaseModel):
+    """Unsigned setup transaction for one contract onboarding action."""
+
+    action: str
+    classification: str
+    cluster: str
+    program_id: str
+    authority: str
+    transaction_encoding: str = "base64"
+    recent_blockhash: str
+    last_valid_block_height: Optional[int] = None
+    message_version: str = "v0"
+    unsigned_transaction: str
+    unsigned_message: str
+    signing_instructions: List[str] = Field(default_factory=list)
+
+
+class ContractSignedTransactionSubmitRequest(BaseModel):
+    """Submit a wallet-signed Rabit contract setup transaction."""
+
+    action: str
+    signed_transaction: str
+    transaction_encoding: str = Field(default="base64")
+    skip_preflight: bool = False
+    max_retries: Optional[int] = None
+
+
+class ContractTransactionSubmitResponse(BaseModel):
+    """Submission response for one setup or backend-signed contract transaction."""
+
+    success: bool
+    action: str
+    transaction_signature: str
+    rpc_url: str
+    detail: Optional[str] = None
+
+
+class ContractAiUsageSettleRequest(BaseModel):
+    """Request to settle one scope's accumulated AI usage on-chain."""
+
+    scope_id: str = Field(..., description="Scope/session ID whose accumulated usage should be settled")
+
+
+class ContractAiUsageSettlementResponse(BaseModel):
+    """Result of settling one scope's AI usage through the Rabit contract."""
+
+    success: bool
+    scope_id: str
+    user_id: Optional[str] = None
+    wallet_address: str
+    transaction_signature: str
+    rpc_url: str
+    settlement_record: Dict[str, Any] = Field(default_factory=dict)
+    onchain_ai_usage: Optional[OnchainAiUsagePreviewResponse] = None
+    detail: Optional[str] = None
+
+
+class ContractAccountResponse(BaseModel):
+    """One decoded on-chain contract account plus its PDA metadata."""
+
+    cluster: str
+    program_id: str
+    account_type: str
+    pda: str
+    exists: bool
+    data: Optional[Dict[str, Any]] = None
+
+
+class ContractModelRegistryListResponse(BaseModel):
+    """List of decoded on-chain model registry accounts."""
+
+    cluster: str
+    program_id: str
+    models: List[Dict[str, Any]] = Field(default_factory=list)
+    total: int = 0
+
+
+class ContractAiUsageRecordResponse(BaseModel):
+    """One decoded on-chain AI usage record."""
+
+    cluster: str
+    program_id: str
+    wallet_address: str
+    spending_profile_pda: str
+    usage_record_pda: str
+    usage_sequence: Optional[int] = None
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ContractAiUsageRecordListResponse(BaseModel):
+    """List of decoded on-chain AI usage records for one wallet."""
+
+    cluster: str
+    program_id: str
+    wallet_address: str
+    spending_profile_pda: str
+    records: List[ContractAiUsageRecordResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class ContractSettlementRecordResponse(BaseModel):
+    """One locally persisted settlement record for on-chain AI usage."""
+
+    scope_id: str
+    user_id: Optional[str] = None
+    wallet_address: Optional[str] = None
+    transaction_signature: Optional[str] = None
+    rpc_url: Optional[str] = None
+    submitted_at: Optional[str] = None
+    usage_sequence: Optional[int] = None
+    model_id: Optional[str] = None
+    base_cost_units: Optional[int] = None
+    service_cost_units: Optional[int] = None
+    total_charged_units: Optional[int] = None
+    onchain_record_found: Optional[bool] = None
+    onchain_record_pda: Optional[str] = None
+    onchain_record: Optional[Dict[str, Any]] = None
+
+
+class ContractSettlementListResponse(BaseModel):
+    """List of locally persisted settlement records."""
+
+    settlements: List[ContractSettlementRecordResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class ContractBackendInstructionResponse(BaseModel):
+    """Backend-signed Rabit contract transaction response."""
+
+    success: bool
+    action: str
+    cluster: str
+    program_id: str
+    instruction_name: str
+    signer: str
+    transaction_signature: str
+    rpc_url: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    detail: Optional[str] = None
+
+
+class ContractAdminUpdatePlatformFeeRequest(BaseModel):
+    """Update platform fee bps through the contract authority."""
+
+    platform_fee_bps: int = Field(..., ge=0)
+
+
+class ContractAdminUpdateDefaultMarkupRequest(BaseModel):
+    """Update default markup bps through the contract authority."""
+
+    default_markup_bps: int = Field(..., ge=0)
+
+
+class ContractAdminUpdateAuthorityRequest(BaseModel):
+    """Update the contract authority wallet."""
+
+    new_authority: str
+
+
+class ContractAdminUpdateBackendAuthorityRequest(BaseModel):
+    """Update the backend authority wallet stored in config."""
+
+    new_backend_authority: str
+
+
+class ContractClaimFeesRequest(BaseModel):
+    """Claim lamports from the fee recipient PDA into the authority wallet."""
+
+    amount: int = Field(..., gt=0)
+
+
+class ContractModelRegisterRequest(BaseModel):
+    """Register one backend model in the on-chain model registry."""
+
+    model_id: str
+    provider: str
+    base_cost_per_token: int = Field(..., ge=0)
+    features: str = ""
+
+
+class ContractModelUpdateRequest(BaseModel):
+    """Update one on-chain model registry entry."""
+
+    model_id: str
+    base_cost_per_token: Optional[int] = Field(default=None, ge=0)
+    is_active: Optional[bool] = None
+    features: Optional[str] = None
+    custom_contract: Optional[str] = None
+
+
+class ContractModelDeactivateRequest(BaseModel):
+    """Deactivate one on-chain model registry entry."""
+
+    model_id: str
+
+
+class ContractDirectAiUsagePrepareRequest(BaseModel):
+    """Prepare a user-signed direct AI usage transaction for one backend scope."""
+
+    scope_id: str = Field(..., description="Scope/session ID whose accumulated usage should be settled directly by the user")
 
 
 class AgentPipelineArtifactResponse(BaseModel):
@@ -512,8 +770,8 @@ class AgentChatResponse(BaseModel):
     conversation_style: str = "normal"
     trading_style: str = "balanced"
     market_context: Optional[AgentMarketContext] = None
-    backpack_execution: Optional[AgentBackpackExecutionContext] = None
-    drift_execution: Optional[AgentDriftExecutionContext] = None
+    execution_gate: Optional[AgentExecutionGateContext] = None
+    tool_preferences: Optional[AgentToolPreferences] = None
     attachment_ids: List[str] = Field(default_factory=list)
     intent: Optional[Dict[str, Any]] = None
     agent_pipeline: Optional[Dict[str, Any]] = None
@@ -521,107 +779,55 @@ class AgentChatResponse(BaseModel):
     service_cost: Optional[ServiceCostSummaryResponse] = None
 
 
-class ExchangeConnectionCreateRequest(BaseModel):
-    """Create a stored exchange connection for a user."""
+class AgentSessionMessageResponse(BaseModel):
+    """One persisted message inside an agent session."""
 
-    user_id: Optional[str] = Field(
-        default=None,
-        description="Optional user ID override. In production this should come from auth.",
-    )
-    exchange: str = Field(default="backpack", description="Exchange identifier such as backpack")
-    label: Optional[str] = Field(default=None, description="Optional user-facing label")
-    api_key: str = Field(..., description="Exchange API key or public verification key")
-    api_secret: str = Field(..., description="Exchange API secret or signing private key")
-    trading_enabled: bool = Field(
-        default=False,
-        description="Whether this stored connection may be used for live execution",
-    )
-    read_only: bool = Field(
-        default=True,
-        description="Whether this stored connection is restricted to read-only usage",
-    )
-    is_active: bool = Field(
-        default=True,
-        description="Whether this connection becomes the active connection for its exchange",
-    )
+    role: str
+    content: str
+    timestamp: str
 
 
-class ExchangeConnectionUpdateRequest(BaseModel):
-    """Update non-secret metadata for a stored exchange connection."""
+class AgentSessionSummaryResponse(BaseModel):
+    """One persisted agent session summary for sidebar/history views."""
 
-    user_id: Optional[str] = Field(
-        default=None,
-        description="Optional user ID override. In production this should come from auth.",
-    )
-    label: Optional[str] = Field(default=None, description="Optional new label")
-    trading_enabled: Optional[bool] = Field(default=None, description="Optional live trading toggle")
-    read_only: Optional[bool] = Field(default=None, description="Optional read-only toggle")
-    is_active: Optional[bool] = Field(default=None, description="Optional active-connection toggle")
-
-
-class ExchangeConnectionResponse(BaseModel):
-    """Public-safe exchange connection metadata."""
-
-    id: str
-    user_id: str
-    exchange: str
-    label: str
-    last4: str
-    fingerprint: str
-    trading_enabled: bool
-    read_only: bool
-    is_active: bool
+    scope_id: str
+    title: str
+    message_count: int = 0
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
-    last_used_at: Optional[str] = None
-    revoked_at: Optional[str] = None
+    last_message: Optional[str] = None
+    user_id: Optional[str] = None
+    scope_mode: Optional[str] = None
+    symbol: Optional[str] = None
+    exchange: Optional[str] = None
+    source_screen: Optional[str] = None
 
 
-class ExchangeConnectionListResponse(BaseModel):
-    """List response for stored exchange connections."""
+class AgentSessionListResponse(BaseModel):
+    """List of persisted agent sessions for one user."""
 
-    user_id: str
-    connections: List[ExchangeConnectionResponse] = Field(default_factory=list)
+    sessions: List[AgentSessionSummaryResponse] = Field(default_factory=list)
     total: int = 0
 
 
-class ExchangeConnectionDeleteResponse(BaseModel):
-    """Delete response for one exchange connection."""
+class AgentSessionDetailResponse(AgentSessionSummaryResponse):
+    """Detailed persisted agent session with full message history."""
+
+    messages: List[AgentSessionMessageResponse] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentSessionUpdateRequest(BaseModel):
+    """Rename metadata for one persisted agent session."""
+
+    title: str = Field(..., description="New non-empty session title")
+
+
+class AgentSessionDeleteResponse(BaseModel):
+    """Delete response for one persisted agent session."""
 
     success: bool
-    connection_id: str
-    user_id: str
-    exchange: str
-
-
-class ExecutionAccessExchangeStatus(BaseModel):
-    """Unified frontend-friendly execution access status for one exchange."""
-
-    exchange: str
-    authority_type: str
-    connected: bool = False
-    execution_ready: bool = False
-    backend_enabled: bool = False
-    active_connection_id: Optional[str] = None
-    label: Optional[str] = None
-    mode: Optional[str] = None
-    auth_wallet_address: Optional[str] = None
-    execution_wallet_address: Optional[str] = None
-    trading_enabled: Optional[bool] = None
-    read_only: Optional[bool] = None
-    same_wallet_required: Optional[bool] = None
-    linked_wallet_supported: Optional[bool] = None
-    backend_held_signer_enabled: Optional[bool] = None
-    notes: List[str] = Field(default_factory=list)
-
-
-class ExecutionAccessResponse(BaseModel):
-    """Unified execution access response for Backpack and Drift."""
-
-    user_id: Optional[str] = None
-    authenticated: bool = False
-    backpack: ExecutionAccessExchangeStatus
-    drift: ExecutionAccessExchangeStatus
+    scope_id: str
 
 
 class WalletAuthNonceRequest(BaseModel):
@@ -673,6 +879,13 @@ class AuthMeResponse(BaseModel):
 
     user_id: str
     wallet_address: str
+    username: Optional[str] = None
+
+
+class UsernameUpdateRequest(BaseModel):
+    """Update the caller's username."""
+
+    username: str = Field(..., description="New username for the authenticated user")
 
 
 class MemoryCreateRequest(BaseModel):

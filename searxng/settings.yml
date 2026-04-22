@@ -3,6 +3,12 @@
 general:
   debug: false
   instance_name: "Rabit Search"
+
+brand:
+  docs_url: https://docs.searxng.org/
+  public_instances: https://searx.space
+  wiki_url: https://github.com/searxng/searxng/wiki
+  issue_url: https://github.com/searxng/searxng/issues
   
 search:
   safe_search: 0
@@ -23,6 +29,15 @@ ui:
 outgoing:
   request_timeout: 3.0
   max_request_timeout: 10.0
+
+doi_resolvers:
+  oadoi.org: https://oadoi.org/
+  doi.org: https://doi.org/
+  sci-hub.se: https://sci-hub.se/
+  sci-hub.st: https://sci-hub.st/
+  sci-hub.ru: https://sci-hub.ru/
+
+default_doi_resolver: oadoi.org
   
 engines:
   # ============================================================================

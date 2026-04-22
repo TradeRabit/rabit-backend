@@ -2,7 +2,7 @@
 Trading Context Management
 
 This module manages the current trading context for the agent, including:
-- Current exchange (drift or backpack)
+- Current venue (phantom, spot, or futures)
 - Current asset being traded
 - Trading mode (asset-locked or global)
 """
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 
-ExchangeType = Literal["drift", "backpack"]
+ExchangeType = Literal["phantom", "spot", "futures"]
 TradingMode = Literal["asset_locked", "global"]
 
 
@@ -22,7 +22,7 @@ class TradingContext:
     Trading context information for the agent
     
     Attributes:
-        exchange: Current exchange (drift or backpack)
+        exchange: Current venue (phantom, spot, or futures)
         asset: Current asset symbol (e.g., BTC, ETH, SOL)
         mode: Trading mode (asset_locked or global)
         updated_at: Last update timestamp
@@ -76,7 +76,7 @@ def set_trading_context(
     Set trading context
     
     Args:
-        exchange: Exchange to use (drift or backpack)
+        exchange: Venue to use (phantom, spot, or futures)
         asset: Asset symbol (required for asset_locked mode)
         mode: Trading mode (asset_locked or global)
     
@@ -111,7 +111,7 @@ def update_exchange(exchange: ExchangeType) -> TradingContext:
     Update only the exchange in current context
     
     Args:
-        exchange: New exchange (drift or backpack)
+        exchange: New venue (phantom, spot, or futures)
     
     Returns:
         Updated TradingContext
@@ -142,7 +142,7 @@ def update_asset(asset: Optional[str]) -> TradingContext:
     
     if _current_context is None:
         # Create new context with default exchange
-        _current_context = TradingContext(exchange="drift", asset=asset)
+        _current_context = TradingContext(exchange="phantom", asset=asset)
     else:
         _current_context.asset = asset.upper() if asset else None
         _current_context.updated_at = datetime.now()
@@ -170,7 +170,7 @@ def update_mode(mode: TradingMode) -> TradingContext:
     
     if _current_context is None:
         # Create new context with default values
-        _current_context = TradingContext(exchange="drift", mode=mode)
+        _current_context = TradingContext(exchange="phantom", mode=mode)
     else:
         _current_context.mode = mode
         _current_context.updated_at = datetime.now()

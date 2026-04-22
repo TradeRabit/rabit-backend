@@ -1,6 +1,6 @@
 """
-OHLC Database for storing historical candlestick data
-Stores OHLC data from multiple exchanges (Binance, Backpack, Drift)
+OHLC Database for storing historical candlestick data.
+Stores OHLC data from Phantom spot and Phantom futures feeds.
 """
 import json
 import os
@@ -23,15 +23,10 @@ class OHLCDatabase:
     Structure:
     {
         "BTC": {
-            "binance": {
-                "1h": [OHLCData, ...],
-                "4h": [OHLCData, ...],
-                "1d": [OHLCData, ...]
-            },
-            "backpack": {
+            "phantom_spot": {
                 "1h": [OHLCData, ...]
             },
-            "drift": {
+            "phantom_futures": {
                 "1h": [OHLCData, ...]
             }
         }
@@ -105,7 +100,7 @@ class OHLCDatabase:
         
         Args:
             symbol: Trading symbol (e.g., 'BTC', 'SOL')
-            exchange: Exchange name ('binance', 'backpack', 'drift')
+            exchange: Exchange name (for example 'phantom_spot' or 'phantom_futures')
             interval: Candle interval (e.g., '1m', '5m', '1h', '1d')
             candles: List of OHLCData objects
             merge: If True, merge with existing data and remove duplicates

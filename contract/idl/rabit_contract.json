@@ -1,0 +1,2489 @@
+{
+  "address": "Eq7vUXz6hdoYDXgmjNT4HbTtZb43QjenDhMLWdqVcpHT",
+  "metadata": {
+    "name": "rabit_contract",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Rabit Smart Contract for Solana"
+  },
+  "instructions": [
+    {
+      "name": "approve_spending_delegate",
+      "discriminator": [
+        96,
+        199,
+        64,
+        167,
+        195,
+        10,
+        41,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "spending_profile",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "delegated_signer",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  101,
+                  100,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "delegated_signer.delegated_pubkey",
+                "account": "DelegatedSigner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_token_account",
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "spending_profile",
+            "delegated_signer"
+          ]
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_fees",
+      "discriminator": [
+        82,
+        251,
+        233,
+        156,
+        12,
+        52,
+        184,
+        202
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_recipient",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  114,
+                  101,
+                  99,
+                  105,
+                  112,
+                  105,
+                  101,
+                  110,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "close_delegated_signer",
+      "discriminator": [
+        136,
+        90,
+        125,
+        108,
+        125,
+        111,
+        60,
+        208
+      ],
+      "accounts": [
+        {
+          "name": "delegated_signer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  101,
+                  100,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "delegated_signer.delegated_pubkey",
+                "account": "DelegatedSigner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "delegated_signer"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_spending_profile",
+      "discriminator": [
+        222,
+        5,
+        95,
+        47,
+        220,
+        110,
+        107,
+        90
+      ],
+      "accounts": [
+        {
+          "name": "spending_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_token_account",
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "spending_profile"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_delegated_signer",
+      "discriminator": [
+        81,
+        63,
+        205,
+        17,
+        119,
+        38,
+        166,
+        161
+      ],
+      "accounts": [
+        {
+          "name": "delegated_signer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  101,
+                  100,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "delegate"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "delegate"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "expiry_duration",
+          "type": "i64"
+        },
+        {
+          "name": "spending_limit",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "deactivate_model",
+      "discriminator": [
+        36,
+        212,
+        100,
+        110,
+        59,
+        184,
+        208,
+        38
+      ],
+      "accounts": [
+        {
+          "name": "model_registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  111,
+                  100,
+                  101,
+                  108,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "model_registry.model_id",
+                "account": "ModelRegistry"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_config",
+      "discriminator": [
+        208,
+        127,
+        21,
+        1,
+        194,
+        190,
+        196,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "fee_recipient",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  101,
+                  101,
+                  95,
+                  114,
+                  101,
+                  99,
+                  105,
+                  112,
+                  105,
+                  101,
+                  110,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "platform_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "default_markup_bps",
+          "type": "u16"
+        },
+        {
+          "name": "backend_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "initialize_spending_profile",
+      "discriminator": [
+        127,
+        77,
+        212,
+        68,
+        57,
+        93,
+        7,
+        220
+      ],
+      "accounts": [
+        {
+          "name": "spending_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payment_mint"
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "record_ai_usage",
+      "discriminator": [
+        190,
+        103,
+        39,
+        228,
+        74,
+        65,
+        254,
+        184
+      ],
+      "accounts": [
+        {
+          "name": "usage_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  95,
+                  117,
+                  115,
+                  97,
+                  103,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "spending_profile"
+              },
+              {
+                "kind": "account",
+                "path": "spending_profile.usage_sequence",
+                "account": "SpendingProfile"
+              }
+            ]
+          }
+        },
+        {
+          "name": "spending_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_token_account",
+          "writable": true
+        },
+        {
+          "name": "fee_recipient_token_account",
+          "writable": true
+        },
+        {
+          "name": "payment_mint"
+        },
+        {
+          "name": "owner",
+          "relations": [
+            "spending_profile"
+          ]
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "model_registry",
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  111,
+                  100,
+                  101,
+                  108,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "model_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "model_id",
+          "type": "string"
+        },
+        {
+          "name": "base_cost",
+          "type": "u64"
+        },
+        {
+          "name": "service_cost",
+          "type": "u64"
+        },
+        {
+          "name": "usage_type",
+          "type": "string"
+        },
+        {
+          "name": "tokens_used",
+          "type": "u64"
+        },
+        {
+          "name": "markup_bps",
+          "type": {
+            "option": "u16"
+          }
+        }
+      ]
+    },
+    {
+      "name": "record_ai_usage_with_delegation",
+      "discriminator": [
+        49,
+        210,
+        221,
+        35,
+        117,
+        175,
+        223,
+        183
+      ],
+      "accounts": [
+        {
+          "name": "usage_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  105,
+                  95,
+                  117,
+                  115,
+                  97,
+                  103,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "spending_profile"
+              },
+              {
+                "kind": "account",
+                "path": "spending_profile.usage_sequence",
+                "account": "SpendingProfile"
+              }
+            ]
+          }
+        },
+        {
+          "name": "spending_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "delegated_signer.owner",
+                "account": "DelegatedSigner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "delegated_signer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  101,
+                  100,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "delegated_signer.owner",
+                "account": "DelegatedSigner"
+              },
+              {
+                "kind": "account",
+                "path": "delegate"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_token_account",
+          "writable": true
+        },
+        {
+          "name": "fee_recipient_token_account",
+          "writable": true
+        },
+        {
+          "name": "payment_mint"
+        },
+        {
+          "name": "model_registry",
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  111,
+                  100,
+                  101,
+                  108,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "model_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "delegate",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "model_id",
+          "type": "string"
+        },
+        {
+          "name": "base_cost",
+          "type": "u64"
+        },
+        {
+          "name": "service_cost",
+          "type": "u64"
+        },
+        {
+          "name": "usage_type",
+          "type": "string"
+        },
+        {
+          "name": "tokens_used",
+          "type": "u64"
+        },
+        {
+          "name": "markup_bps",
+          "type": {
+            "option": "u16"
+          }
+        }
+      ]
+    },
+    {
+      "name": "register_model",
+      "discriminator": [
+        111,
+        236,
+        93,
+        31,
+        195,
+        210,
+        142,
+        125
+      ],
+      "accounts": [
+        {
+          "name": "model_registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  111,
+                  100,
+                  101,
+                  108,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "model_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "model_id",
+          "type": "string"
+        },
+        {
+          "name": "provider",
+          "type": "string"
+        },
+        {
+          "name": "base_cost_per_token",
+          "type": "u64"
+        },
+        {
+          "name": "features",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "revoke_delegated_signer",
+      "discriminator": [
+        246,
+        223,
+        35,
+        42,
+        170,
+        134,
+        219,
+        189
+      ],
+      "accounts": [
+        {
+          "name": "delegated_signer",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  101,
+                  100,
+                  95,
+                  115,
+                  105,
+                  103,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "delegated_signer.delegated_pubkey",
+                "account": "DelegatedSigner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "delegated_signer"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "revoke_spending_delegate",
+      "discriminator": [
+        81,
+        78,
+        80,
+        13,
+        127,
+        157,
+        203,
+        124
+      ],
+      "accounts": [
+        {
+          "name": "spending_profile",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  112,
+                  101,
+                  110,
+                  100,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  114,
+                  111,
+                  102,
+                  105,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_token_account",
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "spending_profile"
+          ]
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "toggle_pause",
+      "discriminator": [
+        238,
+        237,
+        206,
+        27,
+        255,
+        95,
+        123,
+        229
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_authority",
+      "discriminator": [
+        32,
+        46,
+        64,
+        28,
+        149,
+        75,
+        243,
+        88
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "new_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "update_backend_authority",
+      "discriminator": [
+        111,
+        128,
+        15,
+        200,
+        191,
+        189,
+        146,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "new_backend_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "update_default_markup",
+      "discriminator": [
+        95,
+        36,
+        46,
+        233,
+        163,
+        136,
+        255,
+        249
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "new_default_markup_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "update_model",
+      "discriminator": [
+        76,
+        230,
+        44,
+        16,
+        103,
+        83,
+        24,
+        73
+      ],
+      "accounts": [
+        {
+          "name": "model_registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  111,
+                  100,
+                  101,
+                  108,
+                  95,
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "model_registry.model_id",
+                "account": "ModelRegistry"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "base_cost_per_token",
+          "type": {
+            "option": "u64"
+          }
+        },
+        {
+          "name": "is_active",
+          "type": {
+            "option": "bool"
+          }
+        },
+        {
+          "name": "features",
+          "type": {
+            "option": "string"
+          }
+        },
+        {
+          "name": "custom_contract",
+          "type": {
+            "option": "pubkey"
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_platform_fee",
+      "discriminator": [
+        162,
+        97,
+        186,
+        47,
+        93,
+        113,
+        176,
+        243
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "new_platform_fee_bps",
+          "type": "u16"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "AiUsageRecord",
+      "discriminator": [
+        86,
+        205,
+        27,
+        95,
+        90,
+        0,
+        197,
+        59
+      ]
+    },
+    {
+      "name": "DelegatedSigner",
+      "discriminator": [
+        201,
+        110,
+        225,
+        233,
+        23,
+        133,
+        44,
+        115
+      ]
+    },
+    {
+      "name": "ModelRegistry",
+      "discriminator": [
+        174,
+        72,
+        180,
+        46,
+        185,
+        165,
+        246,
+        200
+      ]
+    },
+    {
+      "name": "PlatformConfig",
+      "discriminator": [
+        160,
+        78,
+        128,
+        0,
+        248,
+        83,
+        230,
+        160
+      ]
+    },
+    {
+      "name": "SpendingProfile",
+      "discriminator": [
+        23,
+        41,
+        4,
+        153,
+        58,
+        227,
+        82,
+        185
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AiUsageRecorded",
+      "discriminator": [
+        1,
+        223,
+        176,
+        198,
+        35,
+        107,
+        65,
+        221
+      ]
+    },
+    {
+      "name": "AuthorityTransferred",
+      "discriminator": [
+        245,
+        109,
+        179,
+        54,
+        135,
+        92,
+        22,
+        64
+      ]
+    },
+    {
+      "name": "BackendAuthorityUpdated",
+      "discriminator": [
+        98,
+        99,
+        27,
+        237,
+        9,
+        242,
+        81,
+        200
+      ]
+    },
+    {
+      "name": "ConfigInitialized",
+      "discriminator": [
+        181,
+        49,
+        200,
+        156,
+        19,
+        167,
+        178,
+        91
+      ]
+    },
+    {
+      "name": "DefaultMarkupUpdated",
+      "discriminator": [
+        217,
+        175,
+        43,
+        192,
+        127,
+        131,
+        21,
+        233
+      ]
+    },
+    {
+      "name": "DelegationClosed",
+      "discriminator": [
+        225,
+        66,
+        187,
+        107,
+        192,
+        71,
+        85,
+        138
+      ]
+    },
+    {
+      "name": "FeesClaimed",
+      "discriminator": [
+        22,
+        104,
+        110,
+        222,
+        38,
+        157,
+        14,
+        62
+      ]
+    },
+    {
+      "name": "ModelRegistered",
+      "discriminator": [
+        220,
+        196,
+        19,
+        71,
+        42,
+        237,
+        219,
+        138
+      ]
+    },
+    {
+      "name": "ModelUpdated",
+      "discriminator": [
+        176,
+        73,
+        246,
+        100,
+        211,
+        248,
+        16,
+        248
+      ]
+    },
+    {
+      "name": "PlatformFeeUpdated",
+      "discriminator": [
+        210,
+        134,
+        201,
+        4,
+        92,
+        228,
+        80,
+        26
+      ]
+    },
+    {
+      "name": "PlatformPauseToggled",
+      "discriminator": [
+        37,
+        90,
+        30,
+        242,
+        79,
+        111,
+        135,
+        215
+      ]
+    },
+    {
+      "name": "SpendingProfileClosed",
+      "discriminator": [
+        196,
+        150,
+        214,
+        248,
+        241,
+        117,
+        103,
+        12
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "DelegatedSignerExpired",
+      "msg": "Delegated signer has expired"
+    },
+    {
+      "code": 6001,
+      "name": "DelegatedSignerNotActive",
+      "msg": "Delegated signer is not active"
+    },
+    {
+      "code": 6002,
+      "name": "SpendingLimitExceeded",
+      "msg": "Spending limit exceeded"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidDelegationDuration",
+      "msg": "Invalid delegation duration"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidUsageAmount",
+      "msg": "Invalid usage amount"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidUsageType",
+      "msg": "Invalid usage type"
+    },
+    {
+      "code": 6006,
+      "name": "Unauthorized",
+      "msg": "Unauthorized access"
+    },
+    {
+      "code": 6007,
+      "name": "DelegatedSignerAlreadyRevoked",
+      "msg": "Delegated signer already revoked"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidFeePercentage",
+      "msg": "Invalid fee percentage"
+    },
+    {
+      "code": 6009,
+      "name": "InsufficientFeeBalance",
+      "msg": "Insufficient fee balance"
+    },
+    {
+      "code": 6010,
+      "name": "NotAuthorized",
+      "msg": "Not authorized as admin"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidMarkupPercentage",
+      "msg": "Invalid markup percentage"
+    },
+    {
+      "code": 6012,
+      "name": "NotAuthorizedBackend",
+      "msg": "Not authorized as backend"
+    },
+    {
+      "code": 6013,
+      "name": "ArithmeticOverflow",
+      "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6014,
+      "name": "InvalidAccountOwner",
+      "msg": "Invalid account owner"
+    },
+    {
+      "code": 6015,
+      "name": "AccountAlreadyInitialized",
+      "msg": "Account already initialized"
+    },
+    {
+      "code": 6016,
+      "name": "ModelNotFound",
+      "msg": "Model not found"
+    },
+    {
+      "code": 6017,
+      "name": "ModelNotActive",
+      "msg": "Model not active"
+    },
+    {
+      "code": 6018,
+      "name": "InvalidModelId",
+      "msg": "Invalid model ID"
+    },
+    {
+      "code": 6019,
+      "name": "ModelAlreadyRegistered",
+      "msg": "Model already registered"
+    },
+    {
+      "code": 6020,
+      "name": "CannotCloseWithActiveDelegations",
+      "msg": "Cannot close account with active delegations"
+    },
+    {
+      "code": 6021,
+      "name": "UsageRecordCannotBeClosed",
+      "msg": "Usage record cannot be closed"
+    },
+    {
+      "code": 6022,
+      "name": "InvalidStringLength",
+      "msg": "Invalid string length"
+    },
+    {
+      "code": 6023,
+      "name": "PlatformPaused",
+      "msg": "Platform is paused"
+    },
+    {
+      "code": 6024,
+      "name": "InvalidPaymentMint",
+      "msg": "Invalid payment mint"
+    },
+    {
+      "code": 6025,
+      "name": "InvalidTokenAccountOwner",
+      "msg": "Invalid token account owner"
+    }
+  ],
+  "types": [
+    {
+      "name": "AiUsageRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "spending_profile",
+            "type": "pubkey"
+          },
+          {
+            "name": "delegated_signer",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "model_id",
+            "type": "string"
+          },
+          {
+            "name": "usage_type",
+            "type": "string"
+          },
+          {
+            "name": "tokens_used",
+            "type": "u64"
+          },
+          {
+            "name": "base_cost",
+            "type": "u64"
+          },
+          {
+            "name": "service_cost",
+            "type": "u64"
+          },
+          {
+            "name": "markup_bps",
+            "type": "u16"
+          },
+          {
+            "name": "markup_amount",
+            "type": "u64"
+          },
+          {
+            "name": "platform_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "platform_fee_amount",
+            "type": "u64"
+          },
+          {
+            "name": "total_charged",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "is_verified_model",
+            "type": "bool"
+          },
+          {
+            "name": "pricing_verified",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AiUsageRecorded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "spending_profile",
+            "type": "pubkey"
+          },
+          {
+            "name": "delegated_signer",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "model_id",
+            "type": "string"
+          },
+          {
+            "name": "usage_type",
+            "type": "string"
+          },
+          {
+            "name": "tokens_used",
+            "type": "u64"
+          },
+          {
+            "name": "base_cost",
+            "type": "u64"
+          },
+          {
+            "name": "service_cost",
+            "type": "u64"
+          },
+          {
+            "name": "markup_bps",
+            "type": "u16"
+          },
+          {
+            "name": "markup_amount",
+            "type": "u64"
+          },
+          {
+            "name": "platform_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "platform_fee_amount",
+            "type": "u64"
+          },
+          {
+            "name": "total_charged",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "is_verified_model",
+            "type": "bool"
+          },
+          {
+            "name": "pricing_verified",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AuthorityTransferred",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BackendAuthorityUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old_backend",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_backend",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "backend_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "platform_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "default_markup_bps",
+            "type": "u16"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DefaultMarkupUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old_markup_bps",
+            "type": "u16"
+          },
+          {
+            "name": "new_markup_bps",
+            "type": "u16"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DelegatedSigner",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "delegated_pubkey",
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "spending_limit",
+            "type": "u64"
+          },
+          {
+            "name": "spent_amount",
+            "type": "u64"
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DelegationClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "delegated_pubkey",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_spent",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FeesClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ModelRegistered",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "model_id",
+            "type": "string"
+          },
+          {
+            "name": "provider",
+            "type": "string"
+          },
+          {
+            "name": "base_cost_per_token",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ModelRegistry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "model_id",
+            "type": "string"
+          },
+          {
+            "name": "provider",
+            "type": "string"
+          },
+          {
+            "name": "custom_contract",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "base_cost_per_token",
+            "type": "u64"
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          },
+          {
+            "name": "is_verified",
+            "type": "bool"
+          },
+          {
+            "name": "features",
+            "type": "string"
+          },
+          {
+            "name": "total_usage_count",
+            "type": "u64"
+          },
+          {
+            "name": "total_tokens_processed",
+            "type": "u64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ModelUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "model_id",
+            "type": "string"
+          },
+          {
+            "name": "is_active",
+            "type": "bool"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlatformConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "backend_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "platform_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "default_markup_bps",
+            "type": "u16"
+          },
+          {
+            "name": "fee_recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_fees_collected",
+            "type": "u64"
+          },
+          {
+            "name": "total_markup_collected",
+            "type": "u64"
+          },
+          {
+            "name": "is_paused",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "fee_recipient_bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlatformFeeUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "new_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlatformPauseToggled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "is_paused",
+            "type": "bool"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SpendingProfile",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "payment_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "total_charged",
+            "type": "u64"
+          },
+          {
+            "name": "total_model_cost",
+            "type": "u64"
+          },
+          {
+            "name": "total_service_cost",
+            "type": "u64"
+          },
+          {
+            "name": "total_platform_fee",
+            "type": "u64"
+          },
+          {
+            "name": "total_delegated_usage",
+            "type": "u64"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "usage_sequence",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SpendingProfileClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

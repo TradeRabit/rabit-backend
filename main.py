@@ -33,50 +33,30 @@ async def start_price_streams():
     active_sources = settings.get_price_sources()
     logger.info(f"Active price sources: {', '.join(active_sources) if active_sources else 'none'}")
 
-    if "backpack" in active_sources:
-        logger.info("Starting Backpack WebSocket service...")
+    if "phantom" in active_sources:
+        logger.info("Starting Phantom market service...")
         try:
-            from ws.backpack import get_backpack_service
+            from ws.phantom import get_phantom_service
 
-            backpack_service = get_backpack_service()
-            await backpack_service.start(market_handler)
-            logger.info("Backpack WebSocket service started")
+            phantom_service = get_phantom_service()
+            await phantom_service.start(market_handler)
+            logger.info("Phantom market service started")
         except Exception as e:
-            logger.error(f"Failed to start Backpack service: {e}")
-
-    if "drift" in active_sources:
-        logger.info("Starting Drift WebSocket service...")
-        try:
-            from ws.drift import get_drift_service
-
-            drift_service = get_drift_service()
-            await drift_service.start(market_handler)
-            logger.info("Drift WebSocket service started")
-        except Exception as e:
-            logger.error(f"Failed to start Drift service: {e}")
+            logger.error(f"Failed to start Phantom service: {e}")
 
 
 async def stop_price_streams():
     """Stop configured WebSocket price streams."""
     active_sources = settings.get_price_sources()
 
-    if "backpack" in active_sources:
+    if "phantom" in active_sources:
         try:
-            from ws.backpack import get_backpack_service
+            from ws.phantom import get_phantom_service
 
-            backpack_service = get_backpack_service()
-            await backpack_service.stop()
+            phantom_service = get_phantom_service()
+            await phantom_service.stop()
         except Exception as e:
-            logger.error(f"Error stopping Backpack service: {e}")
-
-    if "drift" in active_sources:
-        try:
-            from ws.drift import get_drift_service
-
-            drift_service = get_drift_service()
-            await drift_service.stop()
-        except Exception as e:
-            logger.error(f"Error stopping Drift service: {e}")
+            logger.error(f"Error stopping Phantom service: {e}")
 
 
 # ============================================================================
@@ -94,16 +74,18 @@ async def lifespan(app: FastAPI):
     # Initialize coin info database
     logger.info("Initializing coin info database...")
     service = get_market_service()
-    
-    # Initialize coins (fetch from CoinGecko if needed)
-    # Use TRADING_ASSETS from config
+
+    # Initialize coins in the background so startup does not block on CoinGecko rate limits.
     symbols = settings.TRADING_ASSETS
-    
-    try:
-        await service.initialize_coins(symbols)
-        logger.info(f"Initialized {len(symbols)} coins")
-    except Exception as e:
-        logger.error(f"Error initializing coins: {e}")
+
+    async def initialize_coins() -> None:
+        try:
+            await service.initialize_coins(symbols)
+            logger.info(f"Initialized {len(symbols)} coins")
+        except Exception as e:
+            logger.error(f"Error initializing coins: {e}")
+
+    asyncio.create_task(initialize_coins())
     
     logger.info(f"Price source config: {settings.PRICE_SOURCE.lower()}")
     await start_price_streams()

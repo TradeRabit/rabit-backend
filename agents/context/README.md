@@ -1,7 +1,7 @@
 # Agent Context Module
 
 This module manages the trading context for AI agents, providing information about:
-- **Current Exchange**: drift or backpack
+- **Current Exchange**: phantom, spot, or futures
 - **Current Asset**: BTC, ETH, SOL, etc.
 - **Trading Mode**: asset-locked or global
 
@@ -21,13 +21,14 @@ This module manages the trading context for AI agents, providing information abo
 
 ## Exchange Selection
 
-The app supports 2 exchanges:
-- **Drift**: Default exchange
-- **Backpack**: Alternative exchange
+The app supports 3 exchange modes:
+- **Phantom**: Default app-facing venue
+- **Spot**: Spot-market mode
+- **Futures**: Futures-market mode
 
 Users can switch exchanges via the dropdown in the home page header (logo + chevron icon).
 
-**Note**: Binance is only used for historical OHLC data, not for live trading.
+**Note**: Historical OHLC and live market data now come from the Phantom/Hyperliquid market layer.
 
 ## Usage
 
@@ -38,14 +39,14 @@ from agents.context import set_trading_context
 
 # Set full context (asset-locked mode)
 context = set_trading_context(
-    exchange="drift",
+    exchange="phantom",
     asset="BTC",
     mode="asset_locked"
 )
 
 # Set global mode
 context = set_trading_context(
-    exchange="backpack",
+    exchange="spot",
     mode="global"
 )
 ```
@@ -56,7 +57,7 @@ context = set_trading_context(
 from agents.context import update_exchange, update_asset, update_mode
 
 # Switch exchange
-update_exchange("backpack")
+update_exchange("spot")
 
 # Change asset
 update_asset("ETH")
@@ -80,7 +81,7 @@ context_str = get_context_for_agent()
 print(context_str)
 # Output:
 # === CURRENT TRADING CONTEXT ===
-# Exchange: DRIFT
+# Exchange: PHANTOM
 # Mode: Asset Locked
 # Asset: BTC
 # Last Updated: 2026-04-16 10:30:45
@@ -108,7 +109,7 @@ agent = TradingAgent(system_prompt=full_prompt)
 
 ### Home Page → Assist (Global Mode)
 1. User is on home page
-2. User selects exchange via dropdown (drift/backpack)
+2. User selects exchange via dropdown (phantom/spot/futures)
 3. User navigates to Assist page
 4. Context: `exchange=selected, mode=global, asset=None`
 5. Agent can trade any asset
@@ -122,7 +123,7 @@ agent = TradingAgent(system_prompt=full_prompt)
 
 ### Switching Exchange
 1. User clicks exchange dropdown in header
-2. Selects different exchange (drift ↔ backpack)
+2. Selects different exchange (phantom ↔ spot/futures)
 3. Context updates: `exchange=new_exchange`
 4. All subsequent trades use new exchange
 
@@ -132,7 +133,7 @@ agent = TradingAgent(system_prompt=full_prompt)
 Dataclass representing trading context.
 
 **Attributes:**
-- `exchange: ExchangeType` - Current exchange (drift or backpack)
+- `exchange: ExchangeType` - Current exchange (phantom, spot, or futures)
 - `asset: Optional[str]` - Current asset symbol (e.g., BTC, ETH)
 - `mode: TradingMode` - Trading mode (asset_locked or global)
 - `updated_at: Optional[datetime]` - Last update timestamp
@@ -144,7 +145,7 @@ Get current trading context.
 Set complete trading context.
 
 **Args:**
-- `exchange: ExchangeType` - Exchange to use (drift or backpack)
+- `exchange: ExchangeType` - Exchange to use (phantom, spot, or futures)
 - `asset: Optional[str]` - Asset symbol (required for asset_locked mode)
 - `mode: TradingMode` - Trading mode (default: global)
 
@@ -173,20 +174,20 @@ Get formatted context string for agent system prompt.
 
 ### Example 1: User on Home Page
 ```python
-# User selects Drift exchange
-set_trading_context(exchange="drift", mode="global")
+# User selects Phantom exchange
+set_trading_context(exchange="phantom", mode="global")
 
-# Agent can now trade any asset on Drift
+# Agent can now trade any asset in Phantom mode
 context = get_trading_context()
 print(context.get_context_summary())
-# Output: "Trading on DRIFT (Global Mode - All Assets)"
+# Output: "Trading on PHANTOM (Global Mode - All Assets)"
 ```
 
 ### Example 2: User on BTC Detail Page
 ```python
 # User clicks "Trade Now" on BTC detail page
 set_trading_context(
-    exchange="drift",
+    exchange="phantom",
     asset="BTC",
     mode="asset_locked"
 )
@@ -194,18 +195,18 @@ set_trading_context(
 # Agent is now locked to BTC
 context = get_trading_context()
 print(context.get_context_summary())
-# Output: "Trading BTC on DRIFT (Asset-Locked Mode)"
+# Output: "Trading BTC on PHANTOM (Asset-Locked Mode)"
 ```
 
 ### Example 3: User Switches Exchange
 ```python
-# User was on Drift, switches to Backpack
-update_exchange("backpack")
+# User was on Phantom, switches to Spot
+update_exchange("spot")
 
 # Context is preserved, only exchange changes
 context = get_trading_context()
 print(f"Now trading on {context.exchange}")
-# Output: "Now trading on backpack"
+# Output: "Now trading on spot"
 ```
 
 ## Integration Points
@@ -220,7 +221,7 @@ The frontend should call the backend API to update context when:
 ```python
 # POST /api/agent/context
 {
-    "exchange": "drift",
+    "exchange": "phantom",
     "asset": "BTC",
     "mode": "asset_locked"
 }

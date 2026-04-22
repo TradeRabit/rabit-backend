@@ -1,0 +1,17 @@
+{
+  "cluster": "devnet",
+  "program_id": "Eq7vUXz6hdoYDXgmjNT4HbTtZb43QjenDhMLWdqVcpHT",
+  "config_pda": "DipGVm96xHJeqJZ6BhJHZEuRkWBptxnecWWHMcRrGAL2",
+  "fee_recipient_pda": "GAAcR82eZgdugS1737HLgKdKjx9vx7yYCSRm4iVwwGb3",
+  "authority_wallet": "HfMHdkJuHztBm1y2JpPfZwauqesZQdmenQaHVL3J9wMP",
+  "backend_authority_wallet": "HfMHdkJuHztBm1y2JpPfZwauqesZQdmenQaHVL3J9wMP",
+  "init_config_signature": "PBWgGVkS4ceBqKrnRHHg1eGPgVEsCfFLPqt9HrGxZu5GGRE9gCipx49kSxVWzZa3b9JmuiRexte82wuvuapY95P",
+  "sample_seeded_model_id": "anthropic/claude-opus-4.7",
+  "sample_seeded_model_pda": "8QDp6qpU2aRKhuH7kC2UeJY1SKDYsGKCWQEqH1fEa1Xh",
+  "sample_model_seed_signature": "WRyX8MCvdA94b43oi4r8XBDJESrP79rDGCR2LkDZ6oNGRQd9i351igjCYH8SrAV1hDcyqyKL49JhATKqZmPtwRo",
+  "enabled_models": 314,
+  "seeded_models": 314,
+  "model_registry_coverage_pct": 100,
+  "verified_at": "2026-04-22",
+  "verification_source": "rabit-contract/scripts/deployment-status.js"
+}

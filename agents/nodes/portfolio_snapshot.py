@@ -46,10 +46,9 @@ async def run_portfolio_snapshot_node(
     sections: Dict[str, Any] = {}
     loop_trace: List[Dict[str, Any]] = []
 
-    backpack_tools = ["backpack_get_balances", "backpack_get_collateral", "backpack_get_positions"]
-    drift_tools = ["drift_get_balances", "drift_get_collateral", "drift_get_positions"]
+    portfolio_tools = ["calculate_position_size"]
 
-    for tool_name in backpack_tools + drift_tools:
+    for tool_name in portfolio_tools:
         ok, payload, error = await _call_required_tool(context, tool_name, {})
         if ok:
             sections[tool_name] = payload
@@ -60,8 +59,8 @@ async def run_portfolio_snapshot_node(
         {
             "phase": "Reason-Act-Critique-Observe",
             "reason": "Gather a compact portfolio snapshot before the final response.",
-            "actions": backpack_tools + drift_tools,
-            "critique": "The node stayed read-only and gathered balances, collateral, and positions only.",
+            "actions": portfolio_tools,
+            "critique": "The node stayed within the currently available portfolio-adjacent tooling.",
             "observe": {
                 "successful_sections": sorted(sections.keys()),
                 "error_count": len(errors),
@@ -83,7 +82,7 @@ async def run_portfolio_snapshot_node(
     return AgentPipelineNodeResult(
         status=status,
         summary=(
-            "Portfolio snapshot node gathered account balances, collateral, and positions."
+            "Portfolio snapshot node gathered available portfolio context."
             if status == "completed"
             else "Portfolio snapshot node gathered partial or no portfolio context."
         ),

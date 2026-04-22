@@ -134,7 +134,7 @@ Tests for system integration and setup:
 
 ### Test Function Naming
 - Use `test_*` prefix for test functions
-- Use descriptive names: `test_normalize_category()`, `test_get_price_from_binance()`
+- Use descriptive names: `test_normalize_category()`, `test_get_price_from_phantom_futures()`
 
 ### Example Test Structure
 ```python

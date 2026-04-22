@@ -321,13 +321,10 @@ def _extract_symbol_from_request(
 
 
 def _has_enabled_execution_gate(
-    backpack_execution: Optional[Dict[str, Any]],
-    drift_execution: Optional[Dict[str, Any]],
+    execution_gate: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """Return whether any live execution gate is enabled for this request."""
-    backpack_enabled = bool((backpack_execution or {}).get("enabled"))
-    drift_enabled = bool((drift_execution or {}).get("enabled"))
-    return backpack_enabled or drift_enabled
+    return bool((execution_gate or {}).get("enabled"))
 
 
 def should_plan_market_snapshot(intent_context: AgentIntentContext) -> bool:
@@ -418,14 +415,13 @@ def build_pipeline_nodes(
     intent_context: AgentIntentContext,
     user_input: str,
     market_context: Optional[Dict[str, Any]] = None,
-    backpack_execution: Optional[Dict[str, Any]] = None,
-    drift_execution: Optional[Dict[str, Any]] = None,
+    execution_gate: Optional[Dict[str, Any]] = None,
 ) -> List[AgentPipelineNodePlan]:
     """Build a composable execution-node plan for one request."""
     nodes: List[AgentPipelineNodePlan] = []
     preplanned_symbol = _extract_symbol_from_request(user_input, market_context)
     chart_planned = False
-    execution_gate_enabled = _has_enabled_execution_gate(backpack_execution, drift_execution)
+    execution_gate_enabled = _has_enabled_execution_gate(execution_gate)
 
     if intent_context.should_clarify:
         nodes.append(
@@ -591,8 +587,8 @@ def build_pipeline_nodes(
                 name=PIPELINE_NODE_EXECUTION_SNAPSHOT,
                 summary="Gather execution readiness and current order state before the main answer.",
                 instruction=(
-                    "Act as an execution-snapshot specialist step. Focus on read-only execution readiness, open-order "
-                    "state, and whether Backpack or Drift execution is enabled for this request."
+                    "Act as an execution-snapshot specialist step. Focus on read-only execution readiness and whether "
+                    "live Phantom execution is enabled for this request."
                 ),
                 config={
                     "execution_gate_enabled_preplan": execution_gate_enabled,
@@ -672,8 +668,7 @@ def build_pipeline_trace(
     intent_context: AgentIntentContext,
     user_input: str = "",
     market_context: Optional[Dict[str, Any]] = None,
-    backpack_execution: Optional[Dict[str, Any]] = None,
-    drift_execution: Optional[Dict[str, Any]] = None,
+    execution_gate: Optional[Dict[str, Any]] = None,
 ) -> AgentPipelineTrace:
     """Build a default pipeline trace after routing."""
     selected_next_agent = resolve_selected_next_agent(intent_context, user_input)
@@ -689,8 +684,7 @@ def build_pipeline_trace(
             intent_context=intent_context,
             user_input=user_input,
             market_context=market_context,
-            backpack_execution=backpack_execution,
-            drift_execution=drift_execution,
+            execution_gate=execution_gate,
         ),
     )
     trace.update_stage(

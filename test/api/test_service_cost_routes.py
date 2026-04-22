@@ -73,6 +73,13 @@ def test_get_service_cost_returns_combined_summary(monkeypatch):
     assert payload["monitor_cost_usd"] == 0.0115
     assert payload["total_cost_usd"] == 0.0238
     assert payload["monitoring_cost"]["trigger_count"] == 1
+    assert payload["onchain_ai_usage"]["model_cost_usd"] == 0.0123
+    assert payload["onchain_ai_usage"]["service_cost_usd"] == 0.0115
+    assert payload["onchain_ai_usage"]["base_cost_units"] == 12300
+    assert payload["onchain_ai_usage"]["service_cost_units"] == 11500
+    assert payload["onchain_ai_usage"]["total_charged_units"] == 26239
+    assert payload["onchain_ai_usage"]["instruction_buildable"] is False
+    assert payload["onchain_ai_usage"]["model_id"] == "anthropic/claude-3.5-sonnet"
 
 
 def test_get_service_cost_rejects_wrong_owner(monkeypatch):

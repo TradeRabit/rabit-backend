@@ -7,6 +7,7 @@ It combines:
 - a FastAPI REST and streaming API surface
 - one adaptive trading agent runtime
 - exchange-aware execution flows for Backpack and Drift
+- a local on-chain contract SDK layer for the deployed Rabit Solana program
 - real-time market-data ingestion
 - long-term memory and request-scoped context
 
@@ -22,6 +23,7 @@ The current backend supports:
 - real-time and chart-oriented market-data flows
 - OpenRouter model catalog management
 - OpenRouter session-cost accumulation per chat scope
+- backend-local contract artifacts, PDA helpers, account decoders, and instruction builders
 
 ## Quick Start
 
@@ -54,6 +56,8 @@ If you want Drift read-only account tools, also install:
 ```bash
 pip install -r requirements-drift-readonly.txt
 ```
+
+That optional dependency set also enables the bundled Rabit on-chain contract SDK under `contract/`.
 
 ### 3. Configure environment variables
 
@@ -132,12 +136,38 @@ rabit-backend/
   api/                FastAPI routes and request/response models
   agents/             agent runtime, routing, tools, auth, and execution helpers
   config/             application settings
+  contract/           deployed Rabit program metadata, IDL, PDA helpers, and SDK layer
   docs/               maintained documentation
   scripts/            smoke tests and helper scripts
   test/               automated tests
   ws/                 websocket and market-data services
   main.py             FastAPI entry point
 ```
+
+## On-Chain Contract Layer
+
+The backend now ships with a dedicated `contract/` package that mirrors the deployed Rabit Solana program and gives backend code one local source of truth for on-chain interaction.
+
+It includes:
+
+- bundled IDL copied from the contract workspace
+- devnet deployment metadata
+- PDA derivation helpers
+- manual account decoders for `PlatformConfig`, `SpendingProfile`, `DelegatedSigner`, `AiUsageRecord`, and `ModelRegistry`
+- async RPC helpers for reading deployed accounts
+- solders instruction builders for core Rabit program interactions
+
+Main entrypoints:
+
+- `contract.load_deployment("devnet")`
+- `contract.load_idl()`
+- `contract.get_rabit_contract_sdk()`
+
+Environment overrides:
+
+- `RABIT_CONTRACT_CLUSTER`
+- `RABIT_CONTRACT_RPC_URL`
+- `RABIT_CONTRACT_PROGRAM_ID`
 
 ## Key API Groups
 

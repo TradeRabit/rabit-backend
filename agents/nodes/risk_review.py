@@ -172,9 +172,8 @@ def _derive_risk_flags(
 
     execution_sections = execution.get("execution_sections", {})
     if isinstance(execution_sections, dict):
-        backpack_enabled = bool((execution_sections.get("backpack_execution") or {}).get("enabled"))
-        drift_enabled = bool((execution_sections.get("drift_execution") or {}).get("enabled"))
-        if execution_sections and not (backpack_enabled or drift_enabled):
+        execution_enabled = bool((execution_sections.get("execution_gate") or {}).get("enabled"))
+        if execution_sections and not execution_enabled:
             flags.append(
                 {
                     "flag": "execution_not_enabled",
@@ -203,9 +202,8 @@ def _derive_risk_flags(
     execution_sections = execution.get("execution_sections", {})
     execution_readiness = "unknown"
     if isinstance(execution_sections, dict) and execution_sections:
-        backpack_enabled = bool((execution_sections.get("backpack_execution") or {}).get("enabled"))
-        drift_enabled = bool((execution_sections.get("drift_execution") or {}).get("enabled"))
-        execution_readiness = "enabled" if (backpack_enabled or drift_enabled) else "disabled"
+        execution_enabled = bool((execution_sections.get("execution_gate") or {}).get("enabled"))
+        execution_readiness = "enabled" if execution_enabled else "disabled"
     confluence_score = (
         (1 if chart else 0)
         + market_signal_count

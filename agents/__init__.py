@@ -18,7 +18,16 @@ from agents.core import TradingAgent, BaseAgent
 from agents.compression import ConversationCompressor
 from agents.tools import ToolRegistry, ToolDefinition, ToolParameter, ToolResult, tool_registry
 from agents.tools_registry import register_trading_tools
-from agents.openrouter import OpenRouterModels, ModelInfo, get_openrouter_models, ModelsDatabase, get_models_database
+from agents.openrouter import (
+    ContractModelRegistryService,
+    ModelInfo,
+    ModelsDatabase,
+    OnchainModelRegistrySnapshot,
+    OpenRouterModels,
+    get_contract_model_registry_service,
+    get_models_database,
+    get_openrouter_models,
+)
 from agents.uploads import (
     AgentAttachment,
     UploadedFileRecord,
@@ -95,6 +104,9 @@ __all__ = [
     "get_openrouter_models",
     "ModelsDatabase",
     "get_models_database",
+    "ContractModelRegistryService",
+    "OnchainModelRegistrySnapshot",
+    "get_contract_model_registry_service",
 
     # Uploads
     "AgentAttachment",

@@ -56,8 +56,29 @@ class DummyMarketService:
 
 class DummyMarketHandler:
     def __init__(self):
+        def make_price(**kwargs):
+            defaults = {
+                "notional_volume_24h": None,
+                "base_volume_24h": None,
+                "open_interest": None,
+                "funding_rate": None,
+                "oracle_price": None,
+                "premium": None,
+                "circulating_supply": None,
+                "total_supply": None,
+                "max_leverage": None,
+                "only_isolated": None,
+                "market_pair": None,
+                "full_name": None,
+                "token_index": None,
+                "is_canonical": None,
+                "source_exchange": "phantom_futures",
+            }
+            defaults.update(kwargs)
+            return SimpleNamespace(**defaults)
+
         self.prices = {
-            "BTC": SimpleNamespace(
+            "BTC": make_price(
                 price=65000.0,
                 change_24h=2.5,
                 volume_24h=1000000.0,
@@ -65,11 +86,9 @@ class DummyMarketHandler:
                 low_24h=64000.0,
                 market_cap=1_000_000_000.0,
                 fdv=1_100_000_000.0,
-                open_interest=None,
-                funding_rate=None,
                 timestamp=SimpleNamespace(isoformat=lambda: "2026-04-18T00:00:00+00:00"),
             ),
-            "ETH": SimpleNamespace(
+            "ETH": make_price(
                 price=3200.0,
                 change_24h=1.5,
                 volume_24h=500000.0,
@@ -77,11 +96,9 @@ class DummyMarketHandler:
                 low_24h=3100.0,
                 market_cap=500_000_000.0,
                 fdv=550_000_000.0,
-                open_interest=None,
-                funding_rate=None,
                 timestamp=SimpleNamespace(isoformat=lambda: "2026-04-18T00:00:00+00:00"),
             ),
-            "UNI": SimpleNamespace(
+            "UNI": make_price(
                 price=12.0,
                 change_24h=-0.5,
                 volume_24h=100000.0,
@@ -89,13 +106,34 @@ class DummyMarketHandler:
                 low_24h=11.5,
                 market_cap=100_000_000.0,
                 fdv=110_000_000.0,
-                open_interest=None,
-                funding_rate=None,
                 timestamp=SimpleNamespace(isoformat=lambda: "2026-04-18T00:00:00+00:00"),
             ),
         }
+        self.exchange_prices = {
+            "phantom_spot": {
+                "BTC": self.prices["BTC"],
+                "ETH": self.prices["ETH"],
+            },
+            "phantom_futures": {
+                "BTC": make_price(
+                    price=64900.0,
+                    change_24h=2.1,
+                    volume_24h=900000.0,
+                    high_24h=65200.0,
+                    low_24h=64100.0,
+                    market_cap=1_000_000_000.0,
+                    fdv=1_100_000_000.0,
+                    open_interest=2500000.0,
+                    funding_rate=0.0001,
+                    timestamp=SimpleNamespace(isoformat=lambda: "2026-04-18T00:00:00+00:00"),
+                ),
+                "UNI": self.prices["UNI"],
+            },
+        }
 
-    def get_price(self, symbol: str):
+    def get_price(self, symbol: str, exchange: str | None = None):
+        if exchange:
+            return self.exchange_prices.get(exchange, {}).get(symbol.upper())
         return self.prices.get(symbol.upper())
 
 
@@ -167,3 +205,23 @@ def test_asset_search_categories_and_supported_routes(monkeypatch):
     assert related_payload["primary_category"] == "Layer 1"
     assert related_payload["total"] == 2
     assert [item["symbol"] for item in related_payload["assets"]] == ["BTC", "UNI"]
+
+    futures_assets_response = client.get("/api/assets", params={"exchange": "futures"})
+    assert futures_assets_response.status_code == 200
+    futures_assets_payload = futures_assets_response.json()
+    assert futures_assets_payload["total"] == 2
+    assert [item["symbol"] for item in futures_assets_payload["assets"]] == ["BTC", "UNI"]
+
+    spot_search_response = client.get("/api/assets/search", params={"q": "eth", "exchange": "spot"})
+    assert spot_search_response.status_code == 200
+    spot_search_payload = spot_search_response.json()
+    assert spot_search_payload["total"] == 1
+    assert spot_search_payload["assets"][0]["symbol"] == "ETH"
+
+    futures_trending_response = client.get("/api/assets/trending", params={"limit": 5, "exchange": "futures"})
+    assert futures_trending_response.status_code == 200
+    futures_trending_payload = futures_trending_response.json()
+    assert [item["symbol"] for item in futures_trending_payload["assets"]] == ["BTC", "UNI"]
+
+    invalid_exchange_response = client.get("/api/assets", params={"exchange": "kraken"})
+    assert invalid_exchange_response.status_code == 400

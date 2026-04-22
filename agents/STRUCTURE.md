@@ -101,7 +101,7 @@ from agents import set_trading_context, get_context_for_agent
 
 # Set context (e.g., when user clicks "Trade Now" on BTC page)
 set_trading_context(
-    exchange="drift",
+    exchange="phantom",
     asset="BTC",
     mode="asset_locked"
 )

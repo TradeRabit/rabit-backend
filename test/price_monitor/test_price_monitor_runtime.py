@@ -25,7 +25,7 @@ async def test_add_price_alert_returns_default_prompt_templates(monkeypatch):
         validation_price=95000,
         invalidation_price=90000,
         direction="LONG",
-        exchange="drift",
+        exchange="futures",
         trade_label="Trade A",
         trade_id="trade_a",
         setup_id="setup_a",
@@ -37,8 +37,8 @@ async def test_add_price_alert_returns_default_prompt_templates(monkeypatch):
     assert result["trade_label"] == "Trade A"
     assert result["trade_id"] == "trade_a"
     assert result["setup_id"] == "setup_a"
-    assert result["default_prompts"]["validation"] == "Trade A hit validation price at $95,000.00 on DRIFT for BTC."
-    assert result["default_prompts"]["invalidation"] == "Trade A hit invalidation price at $90,000.00 on DRIFT for BTC."
+    assert result["default_prompts"]["validation"] == "Trade A hit validation price at $95,000.00 on FUTURES for BTC."
+    assert result["default_prompts"]["invalidation"] == "Trade A hit invalidation price at $90,000.00 on FUTURES for BTC."
 
 
 @pytest.mark.asyncio
@@ -60,7 +60,7 @@ async def test_price_monitor_broadcasts_structured_trigger_event():
         validation_price=95000,
         invalidation_price=90000,
         direction="LONG",
-        exchange="drift",
+        exchange="futures",
         trade_label="Trade A",
         trade_id="trade_a",
     )
@@ -81,7 +81,7 @@ async def test_price_monitor_broadcasts_structured_trigger_event():
     assert alert["trade_id"] == "trade_a"
     assert alert["trigger_type"] == "VALIDATION"
     assert alert["trigger_price"] == 95050.0
-    assert alert["default_prompt"] == "Trade A hit validation price at $95,050.00 on DRIFT for BTC."
+    assert alert["default_prompt"] == "Trade A hit validation price at $95,050.00 on FUTURES for BTC."
     monkeypatch.undo()
 
 
@@ -109,7 +109,7 @@ async def test_price_monitor_callback_receives_default_prompt_event():
         validation_price=3000,
         invalidation_price=3200,
         direction="SHORT",
-        exchange="backpack",
+        exchange="spot",
         setup_id="eth_short_setup",
     )
 
@@ -122,7 +122,7 @@ async def test_price_monitor_callback_receives_default_prompt_event():
     payload = received[0]
     assert payload["type"] == "price_alert_triggered"
     assert payload["setup_id"] == "eth_short_setup"
-    assert payload["default_prompt"] == "eth_short_setup hit validation price at $2,990.00 on BACKPACK for ETH."
+    assert payload["default_prompt"] == "eth_short_setup hit validation price at $2,990.00 on SPOT for ETH."
     assert payload["message"] == payload["default_prompt"]
     monkeypatch.undo()
 
@@ -134,7 +134,7 @@ def test_price_alert_to_dict_includes_trigger_prompt():
         validation_price=95000,
         invalidation_price=90000,
         direction="LONG",
-        exchange="binance",
+        exchange="futures",
         trade_label="BTC breakout",
     )
 
@@ -142,7 +142,7 @@ def test_price_alert_to_dict_includes_trigger_prompt():
 
     data = alert.to_dict()
     assert data["trade_label"] == "BTC breakout"
-    assert data["default_prompt"] == "BTC breakout hit validation price at $95,123.45 on BINANCE for BTC."
+    assert data["default_prompt"] == "BTC breakout hit validation price at $95,123.45 on FUTURES for BTC."
 
 
 def test_price_monitor_filters_alerts_by_scope_and_user(monkeypatch):
@@ -158,7 +158,7 @@ def test_price_monitor_filters_alerts_by_scope_and_user(monkeypatch):
         validation_price=95000,
         invalidation_price=90000,
         direction="LONG",
-        exchange="drift",
+        exchange="futures",
         scope_id="scope-a",
         user_id="wallet:user-a",
     )
@@ -167,7 +167,7 @@ def test_price_monitor_filters_alerts_by_scope_and_user(monkeypatch):
         validation_price=3000,
         invalidation_price=3200,
         direction="SHORT",
-        exchange="backpack",
+        exchange="spot",
         scope_id="scope-b",
         user_id="wallet:user-b",
     )

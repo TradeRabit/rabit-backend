@@ -19,6 +19,7 @@ class MarketDataHandler:
             auto_save_ohlc: Automatically save OHLC data to database
         """
         self.price_data: Dict[str, PriceUpdate] = {}
+        self.price_data_by_exchange: Dict[str, Dict[str, PriceUpdate]] = {}
         self.ohlc_data: Dict[str, Dict[str, List[OHLCData]]] = {}  # symbol -> interval -> candles
         self.listeners: Dict[str, List[Callable]] = {}
         self.auto_save_ohlc = auto_save_ohlc
@@ -27,7 +28,7 @@ class MarketDataHandler:
     
     async def on_price_update(self, price_update: PriceUpdate):
         """
-        Handle price update from Drift
+        Handle one generic price update from the active market source.
         
         Args:
             price_update: Price update data
@@ -50,15 +51,22 @@ class MarketDataHandler:
         Handle price update with explicit exchange source.
 
         Args:
-            exchange: Exchange name ('drift', 'backpack', etc.)
+            exchange: Exchange name (for example 'phantom_spot' or 'phantom_futures')
             price_update: Price update data
         """
-        self.exchange_source = exchange.lower()
+        normalized_exchange = exchange.lower()
+        symbol = price_update.symbol
+
+        if normalized_exchange not in self.price_data_by_exchange:
+            self.price_data_by_exchange[normalized_exchange] = {}
+
+        self.price_data_by_exchange[normalized_exchange][symbol] = price_update
+        self.exchange_source = normalized_exchange
         await self.on_price_update(price_update)
     
     async def on_ohlc_update(self, ohlc_data: OHLCData, interval: str = "1h"):
         """
-        Handle OHLC update from Backpack, Binance, or Drift
+        Handle OHLC update from the active market source
         
         Args:
             ohlc_data: OHLC data
@@ -109,7 +117,7 @@ class MarketDataHandler:
         Handle OHLC update with explicit exchange source.
 
         Args:
-            exchange: Exchange name ('drift', 'backpack', etc.)
+            exchange: Exchange name (for example 'phantom_spot' or 'phantom_futures')
             ohlc_data: OHLC data
             interval: Candle interval
         """
@@ -190,17 +198,24 @@ class MarketDataHandler:
                 except Exception as e:
                     logger.error(f"Error in listener callback: {str(e)}")
     
-    def get_price(self, symbol: str) -> Optional[PriceUpdate]:
+    def get_price(self, symbol: str, exchange: Optional[str] = None) -> Optional[PriceUpdate]:
         """
         Get latest price for a symbol
         
         Args:
             symbol: Trading symbol
+            exchange: Optional exchange source (for example 'phantom_spot' or 'phantom_futures')
             
         Returns:
             Latest price update or None
         """
-        return self.price_data.get(symbol)
+        normalized_symbol = symbol.upper()
+
+        if exchange:
+            exchange_prices = self.price_data_by_exchange.get(exchange.lower(), {})
+            return exchange_prices.get(normalized_symbol)
+
+        return self.price_data.get(normalized_symbol)
     
     def get_ohlc(self, symbol: str, interval: Optional[str] = None, limit: Optional[int] = None) -> List[OHLCData]:
         """
@@ -231,8 +246,11 @@ class MarketDataHandler:
         
         return data
     
-    def get_all_prices(self) -> Dict[str, PriceUpdate]:
-        """Get all price data"""
+    def get_all_prices(self, exchange: Optional[str] = None) -> Dict[str, PriceUpdate]:
+        """Get all price data, optionally scoped to one exchange."""
+        if exchange:
+            return self.price_data_by_exchange.get(exchange.lower(), {}).copy()
+
         return self.price_data.copy()
     
     def get_all_ohlc(self) -> Dict[str, Dict[str, List[OHLCData]]]:
@@ -244,7 +262,7 @@ class MarketDataHandler:
         Set the exchange source for auto-saving OHLC data
         
         Args:
-            exchange: Exchange name ('binance', 'backpack', 'drift')
+            exchange: Exchange name (for example 'phantom_spot' or 'phantom_futures')
         """
         self.exchange_source = exchange.lower()
         logger.info(f"Set exchange source for OHLC auto-save: {self.exchange_source}")

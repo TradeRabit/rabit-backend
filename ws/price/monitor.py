@@ -26,7 +26,7 @@ class PriceAlert:
         validation_price: float,
         invalidation_price: float,
         direction: str = "LONG",
-        exchange: str = "drift",
+        exchange: str = "phantom",
         trade_label: Optional[str] = None,
         trade_id: Optional[str] = None,
         setup_id: Optional[str] = None,
@@ -238,7 +238,7 @@ class PriceMonitor:
         validation_price: float,
         invalidation_price: float,
         direction: str = "LONG",
-        exchange: str = "drift",
+        exchange: str = "phantom",
         alert_id: Optional[str] = None,
         trade_label: Optional[str] = None,
         trade_id: Optional[str] = None,
@@ -254,7 +254,7 @@ class PriceMonitor:
             validation_price: Price level for validation
             invalidation_price: Price level for invalidation
             direction: Trade direction (LONG or SHORT)
-            exchange: Exchange to monitor (drift, backpack, binance)
+            exchange: Exchange to monitor (phantom, spot, or futures)
             alert_id: Optional custom alert ID
             trade_label: Optional user-facing trade label
             trade_id: Optional trade reference ID
@@ -268,8 +268,8 @@ class PriceMonitor:
         if direction.upper() not in ["LONG", "SHORT"]:
             raise ValueError("Direction must be LONG or SHORT")
 
-        if exchange.lower() not in ["drift", "backpack", "binance"]:
-            raise ValueError("Exchange must be drift, backpack, or binance")
+        if exchange.lower() not in ["phantom", "spot", "futures"]:
+            raise ValueError("Exchange must be phantom, spot, or futures")
 
         if direction.upper() == "LONG":
             if validation_price <= invalidation_price:
